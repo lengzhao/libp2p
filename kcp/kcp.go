@@ -73,7 +73,7 @@ const (
 	ECmdAck
 	ECmdResend
 	ECmdReset
-	ECmdWindow
+	ECmdMTU
 	ECmdClose
 )
 
@@ -126,8 +126,8 @@ func (k *KCP) Input(data []byte) {
 			k.receiveResend(sgm)
 		case ECmdReset:
 			k.receiveReset(sgm)
-		case ECmdWindow:
-			k.receiveWindow(sgm)
+		case ECmdMTU:
+			k.receiveMTU(sgm)
 		case ECmdClose:
 			k.receiveClose(sgm)
 		default:
@@ -262,8 +262,8 @@ func (k *KCP) receiveReset(rs *tSegment) {
 	}
 }
 
-func (k *KCP) receiveWindow(wnd *tSegment) {
-	if int(wnd.Size) > k.mtu {
+func (k *KCP) receiveMTU(wnd *tSegment) {
+	if int(wnd.Size) >= k.mtu {
 		return
 	} else if wnd.Size < CMinMtuSize {
 		return
@@ -273,6 +273,21 @@ func (k *KCP) receiveWindow(wnd *tSegment) {
 
 func (k *KCP) receiveClose(sgm *tSegment) {
 	k.isClosed = true
+}
+
+// SetMTU set mtu
+func (k *KCP) SetMTU(mtu int) {
+	if mtu >= k.mtu {
+		return
+	} else if mtu < CMinMtuSize {
+		return
+	}
+	k.mtu = mtu
+	sgm := new(tSegment)
+	sgm.Conv = k.conv
+	sgm.Cmd = ECmdMTU
+	sgm.Size = uint16(mtu)
+	k.writeQueue = append(k.writeQueue, sgm)
 }
 
 // IsClosed return true when closed
