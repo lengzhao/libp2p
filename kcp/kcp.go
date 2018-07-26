@@ -27,8 +27,7 @@ type KCP struct {
 	// first id in writeSegment
 	writeAckID uint8
 
-	inBuff  []byte
-	outBuff []byte
+	inBuff []byte
 
 	peerResendFrag uint8
 	peerResendTime int64
@@ -381,15 +380,15 @@ func (k *KCP) update() error {
 	}
 
 	//output to write
-	k.outBuff = make([]byte, k.mtu+cHeadSize)
-	buff := k.outBuff
+	outBuff := make([]byte, k.mtu+cHeadSize)
+	buff := outBuff
 	for _, sgm := range k.writeQueue {
 		if len(sgm.Data)+cHeadSize > len(buff) {
-			endOff := len(k.outBuff) - len(buff)
-			k.outBuff = k.outBuff[:endOff]
-			k.output(k.outBuff)
-			k.outBuff = make([]byte, k.mtu+cHeadSize)
-			buff = k.outBuff
+			endOff := len(outBuff) - len(buff)
+			outBuff = outBuff[:endOff]
+			k.output(outBuff)
+			outBuff = make([]byte, k.mtu+cHeadSize)
+			buff = outBuff
 		}
 		encode(sgm.tSegmentHead, buff)
 		buff = buff[cHeadSize:]
@@ -398,10 +397,9 @@ func (k *KCP) update() error {
 			buff = buff[len(sgm.Data):]
 		}
 	}
-	endOff := len(k.outBuff) - len(buff)
-	k.outBuff = k.outBuff[:endOff]
-	k.output(k.outBuff)
-	k.outBuff = nil
+	endOff := len(outBuff) - len(buff)
+	outBuff = outBuff[:endOff]
+	k.output(outBuff)
 	k.writeQueue = make([]*tSegment, 0)
 
 	return nil
