@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	// "log"
 	"time"
 )
 
 // KCP A Fast and Reliable ARQ Protocol
 type KCP struct {
-	conv int32
+	conv uint32
 	mtu  int
 
 	// wait ack
@@ -20,8 +21,6 @@ type KCP struct {
 
 	// id in readQueue
 	readID uint8
-	// in writeSegment but not write
-	waitWriteID uint8
 	// write but not receive ack
 	writeID uint8
 	// first id in writeSegment
@@ -37,14 +36,15 @@ type KCP struct {
 	// read data
 	readQueue []*tSegment
 	// need to be sent immediately
-	writeQueue []*tSegment
-	isClosed   bool
+	writeQueue     []*tSegment
+	waitWriteQueue []*tSegment
+	isClosed       bool
 
 	output func(data []byte)
 }
 
 type tSegmentHead struct {
-	Conv int32
+	Conv uint32
 	Cmd  uint8
 	Frag uint8
 	Size uint16
@@ -58,13 +58,16 @@ type tSegment struct {
 
 const (
 	// CMaxWndSize max window size
-	CMaxWndSize = 60
+	CMaxWndSize = 30
+	// CMinWndSize min window size
+	CMinWndSize = 3
 	// CMaxMtuSize max mtu size
 	CMaxMtuSize = 1400
 	// CMinMtuSize min mtu size
-	CMinMtuSize = 400
-	resendLimit = 3
-	cHeadSize   = 8
+	CMinMtuSize  = 400
+	resendLimit  = 3
+	cHeadSize    = 8
+	cMinInterval = int64(time.Millisecond * 10)
 )
 
 // command of kcp
@@ -78,24 +81,20 @@ const (
 )
 
 // NewKCP new kcp,kcp not any lock
-func NewKCP(conv int32, cb func([]byte)) *KCP {
+func NewKCP(conv uint32, cb func([]byte)) *KCP {
 	kcp := new(KCP)
 	kcp.conv = conv
 	kcp.windowSize = resendLimit
-	kcp.mtu = CMaxMtuSize
+	kcp.mtu = CMaxMtuSize - cHeadSize
 	kcp.writeSegment = make(map[uint8]*tSegment)
 	kcp.readSegment = make(map[uint8]*tSegment)
 
 	kcp.readQueue = make([]*tSegment, 0)
 	kcp.writeQueue = make([]*tSegment, 0)
-	kcp.interval = int64(time.Millisecond) * 10
+	kcp.interval = cMinInterval * 10
 
 	kcp.output = cb
 	return kcp
-}
-
-func encode(in tSegmentHead, out []byte) {
-	binary.Write(bytes.NewBuffer(out), binary.BigEndian, in)
 }
 
 func decode(in []byte, out *tSegmentHead) {
@@ -107,7 +106,7 @@ func (k *KCP) Input(data []byte) {
 	if len(data) < cHeadSize {
 		return
 	}
-	if len(data) > k.mtu+cHeadSize {
+	if len(data) > CMaxMtuSize {
 		return
 	}
 	k.inBuff = data
@@ -117,6 +116,8 @@ func (k *KCP) Input(data []byte) {
 		if sgm.Conv != k.conv {
 			return
 		}
+		// log.Printf("Input %p,id:%d,cmd:%d\n", k, sgm.Frag, sgm.Cmd)
+		k.inBuff = k.inBuff[cHeadSize:]
 		switch sgm.Cmd {
 		case ECmdSend:
 			k.receiveSend(sgm)
@@ -135,7 +136,7 @@ func (k *KCP) Input(data []byte) {
 			break
 		}
 	}
-	k.update()
+	k.Update()
 }
 
 func (k *KCP) receiveSend(send *tSegment) {
@@ -144,7 +145,8 @@ func (k *KCP) receiveSend(send *tSegment) {
 		return
 	}
 
-	if len(k.readQueue) > CMaxWndSize {
+	//busy
+	if len(k.readQueue)+len(k.readSegment) >= CMaxWndSize {
 		k.inBuff = k.inBuff[send.Size:]
 		return
 	}
@@ -174,6 +176,7 @@ func (k *KCP) receiveSend(send *tSegment) {
 		}
 		delete(k.readSegment, k.readID)
 		k.readQueue = append(k.readQueue, sgm)
+		// log.Printf("receiveSend %p,id:%d,len:%d\n", k, sgm.Frag, len(sgm.Data))
 		k.readID++
 	}
 	if len(k.readSegment) == 0 {
@@ -181,11 +184,17 @@ func (k *KCP) receiveSend(send *tSegment) {
 	}
 	now := time.Now().UnixNano()
 	if k.peerResendFrag != k.readID {
-		k.readID = k.peerResendFrag
-		k.peerResendTime = now
+		k.peerResendFrag = k.readID
+		if len(k.readSegment) > CMinWndSize {
+			k.peerResendTime = 0
+		} else {
+			k.peerResendTime = now + k.interval
+		}
 		return
+	} else if len(k.readSegment) == CMinWndSize {
+		k.peerResendTime = 0
 	}
-	if k.peerResendTime+k.interval > now {
+	if k.peerResendTime > now {
 		return
 	}
 	// timeout,must resend
@@ -194,7 +203,8 @@ func (k *KCP) receiveSend(send *tSegment) {
 	resend.Cmd = ECmdResend
 	resend.Frag = k.readID
 	k.writeQueue = append(k.writeQueue, resend)
-	k.peerResendTime = now + k.interval
+	// log.Printf("receiveSend,req resend %p,id:%d,timeout:%d\n", k, resend.Frag, k.peerResendTime)
+	k.peerResendTime = now + k.interval*2
 }
 
 func (k *KCP) receiveAck(ack *tSegment) {
@@ -206,9 +216,9 @@ func (k *KCP) receiveAck(ack *tSegment) {
 		return
 	}
 	now := time.Now().UnixNano()
-	// update interval
+	// Update interval
 	if now-sgm.timeout < int64(time.Minute) {
-		k.interval = (k.interval*19+now-sgm.timeout)/20 + 1000
+		k.interval = (k.interval*19+now-sgm.timeout)/20 + cMinInterval
 	}
 	delete(k.writeSegment, sgm.Frag)
 
@@ -221,8 +231,9 @@ func (k *KCP) receiveAck(ack *tSegment) {
 		}
 		// timeout, must resend
 		if sgm.timeout <= now {
-			k.windowSize = k.windowSize/2 + 1
-			sgm.timeout = now + k.interval
+			k.windowSize = k.windowSize/2 + CMinWndSize
+			// log.Printf("ack to resend.id:%d,timeout:%d,new timeout:%d \n", sgm.Frag, sgm.timeout, now+k.interval*2)
+			sgm.timeout = now + k.interval*2
 			k.writeQueue = append(k.writeQueue, sgm)
 		}
 		break
@@ -239,9 +250,11 @@ func (k *KCP) receiveResend(rs *tSegment) {
 		rst.Conv = k.conv
 		rst.Cmd = ECmdReset
 		rst.Frag = rs.Frag
-		k.writeQueue = append(k.writeQueue)
+		k.writeQueue = append(k.writeQueue, rst)
 		return
 	}
+	k.windowSize = k.windowSize/2 + CMinWndSize
+	sgm.timeout = time.Now().UnixNano() + k.interval*2
 	k.writeQueue = append(k.writeQueue, sgm)
 }
 
@@ -301,9 +314,9 @@ func (k *KCP) Close() {
 	sgm := new(tSegment)
 	sgm.Conv = k.conv
 	sgm.Cmd = ECmdClose
-	buff := make([]byte, cHeadSize)
-	encode(sgm.tSegmentHead, buff)
-	k.output(buff)
+	buff := new(bytes.Buffer)
+	binary.Write(buff, binary.BigEndian, sgm.tSegmentHead)
+	k.output(buff.Bytes())
 }
 
 func (k *KCP) Read(buf []byte) (n int, err error) {
@@ -331,7 +344,7 @@ func (k *KCP) Write(data []byte) (n int, err error) {
 	if k.isClosed {
 		return 0, errors.New("closed")
 	}
-	if len(k.writeSegment) >= k.windowSize {
+	if len(k.writeSegment)+len(k.waitWriteQueue) >= CMaxWndSize {
 		return 0, nil
 	}
 
@@ -340,8 +353,7 @@ func (k *KCP) Write(data []byte) (n int, err error) {
 		sgm := new(tSegment)
 		sgm.Conv = k.conv
 		sgm.Cmd = ECmdSend
-		sgm.Frag = k.waitWriteID
-		k.waitWriteID++
+		sgm.Frag = k.writeID + uint8(len(k.waitWriteQueue))
 		if len(data) > k.mtu {
 			sgm.Size = uint16(k.mtu)
 			sgm.Data = data[:k.mtu]
@@ -351,14 +363,16 @@ func (k *KCP) Write(data []byte) (n int, err error) {
 			sgm.Data = data
 			data = nil
 		}
-		k.writeSegment[sgm.Frag] = sgm
+		// log.Printf("waitWriteQueue %p,id:%d,len:%d\n", k, sgm.Frag, len(sgm.Data))
+		k.waitWriteQueue = append(k.waitWriteQueue, sgm)
 	}
-	k.update()
+	k.Update()
 
 	return
 }
 
-func (k *KCP) update() error {
+// Update update to resend/write data
+func (k *KCP) Update() error {
 	if k.isClosed {
 		return errors.New("closed")
 	}
@@ -366,28 +380,36 @@ func (k *KCP) update() error {
 	// check write timeout
 	if len(k.writeSegment) > 0 {
 		sgm := k.writeSegment[k.writeAckID]
-		if sgm.timeout > now {
-			sgm.timeout = now + k.interval
+		if sgm.timeout < now {
+			sgm.timeout = now + k.interval*2
 			k.writeQueue = append(k.writeQueue, sgm)
 		}
 	}
 	// check read timeout
-	if k.peerResendFrag == k.readID {
-		if k.peerResendTime >= now {
-			k.peerResendTime = now + k.interval
-			rsd := new(tSegment)
-			rsd.Conv = k.conv
-			rsd.Cmd = ECmdResend
-			rsd.Frag = k.readID
-			k.writeQueue = append(k.writeQueue, rsd)
+	if len(k.readSegment) > 0 {
+		if k.peerResendFrag == k.readID {
+			if k.peerResendTime <= now {
+				k.peerResendTime = now + k.interval*2
+				rsd := new(tSegment)
+				rsd.Conv = k.conv
+				rsd.Cmd = ECmdResend
+				rsd.Frag = k.readID
+				k.writeQueue = append(k.writeQueue, rsd)
+			}
+		} else {
+			k.peerResendFrag = k.readID
+			k.peerResendTime = now + k.interval*2
 		}
 	}
 	// write new data
-	for k.writeID-k.writeAckID < CMaxWndSize && k.writeID < k.waitWriteID {
-		sgm := k.writeSegment[k.writeID]
-		sgm.timeout = now + k.interval
+	for len(k.waitWriteQueue) > 0 && len(k.writeSegment) < k.windowSize {
+		sgm := k.waitWriteQueue[0]
+		k.waitWriteQueue = k.waitWriteQueue[1:]
+		// log.Printf("update to write.id:%d,timeout:%d,new timeout:%d \n", sgm.Frag, sgm.timeout, now+k.interval*2)
+		sgm.timeout = now + k.interval*2
 		k.writeID++
 		k.writeQueue = append(k.writeQueue, sgm)
+		k.writeSegment[sgm.Frag] = sgm
 	}
 
 	if len(k.writeQueue) == 0 {
@@ -395,27 +417,22 @@ func (k *KCP) update() error {
 	}
 
 	//output to write
-	outBuff := make([]byte, k.mtu+cHeadSize)
-	buff := outBuff
-	for _, sgm := range k.writeQueue {
-		if len(sgm.Data)+cHeadSize > len(buff) {
-			endOff := len(outBuff) - len(buff)
-			outBuff = outBuff[:endOff]
-			k.output(outBuff)
-			outBuff = make([]byte, k.mtu+cHeadSize)
-			buff = outBuff
+	queue := k.writeQueue
+	k.writeQueue = make([]*tSegment, 0)
+
+	buff := new(bytes.Buffer)
+	for _, sgm := range queue {
+		// log.Printf("output %p,id:%d,cmd:%d,len:%d,timeout:%d.\n", k, sgm.Frag, sgm.Cmd, len(sgm.Data), sgm.timeout)
+		if len(sgm.Data)+buff.Len() > k.mtu {
+			k.output(buff.Bytes())
+			buff = new(bytes.Buffer)
 		}
-		encode(sgm.tSegmentHead, buff)
-		buff = buff[cHeadSize:]
+		binary.Write(buff, binary.BigEndian, sgm.tSegmentHead)
 		if sgm.Data != nil {
-			copy(buff, sgm.Data)
-			buff = buff[len(sgm.Data):]
+			buff.Write(sgm.Data)
 		}
 	}
-	endOff := len(outBuff) - len(buff)
-	outBuff = outBuff[:endOff]
-	k.output(outBuff)
-	k.writeQueue = make([]*tSegment, 0)
+	k.output(buff.Bytes())
 
 	return nil
 }
