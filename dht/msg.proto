@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package dht;
+
+message Traversal {
+    string FromAddr = 1;
+    string ToAddr = 2;
+}
+
+message Ping {
+
+}
+
+message Pong {
+
+}
+
+message Find {
+
+}
+
+
