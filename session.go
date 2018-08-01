@@ -1,6 +1,7 @@
 package libp2p
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"github.com/gogo/protobuf/proto"
@@ -81,13 +82,12 @@ func (c *PeerSession) receiveMsg() {
 }
 
 func (c *PeerSession) process(ns *smux.Stream) {
-	// defer func() {
-	// 	defer ns.Close()
-	// 	if err := recover(); err != nil {
-	// 		fmt.Println("process painc:", err)
-	// 		debug.PrintStack()
-	// 	}
-	// }()
+	defer func() {
+		ns.Close()
+		if err := recover(); err != nil {
+			fmt.Println("process painc:", err)
+		}
+	}()
 	data := make([]byte, binary.MaxVarintLen64)
 	_, err := ns.Read(data)
 	if err != nil {
@@ -101,20 +101,64 @@ func (c *PeerSession) process(ns *smux.Stream) {
 		return
 	}
 	data = make([]byte, l)
+	buff := data
 	var n int
 	for {
-		ln, err := ns.Read(data)
+		ln, err := ns.Read(buff)
 		n += ln
 		if err != nil || n >= int(l) {
 			break
 		}
+		buff = buff[ln:]
 	}
 	if n < int(l) {
 		log.Println("error data length:", n, "<", l)
 		return
 	}
 	log.Println("receive data form:", c.GetRemoteAddress(), len(data))
-	newContext(c, data)
+
+	var msg crypto.Message
+	err = proto.Unmarshal(data, &msg)
+	if err != nil {
+		c.Close()
+		return
+	}
+	if bytes.Compare(msg.To, c.Net.publicKey) != 0 {
+		c.Close()
+		return
+	}
+	if c.isServer && c.peerID == nil {
+		c.peerID = msg.From
+	}
+	if bytes.Compare(msg.From, c.peerID) != 0 {
+		c.Close()
+		return
+	}
+	if msg.Timestamp > time.Now().Add(time.Minute).UnixNano() ||
+		msg.Timestamp < time.Now().Add(-time.Minute).UnixNano() {
+		return
+	}
+	var ptr types.DynamicAny
+	err = types.UnmarshalAny(msg.DataMsg, &ptr)
+	if err != nil {
+		c.Close()
+		return
+	}
+	sign := msg.Sign
+	msg.Sign = nil
+	data, _ = proto.Marshal(&msg)
+	key, ok := c.Net.keygen[msg.Keygen]
+	if !ok {
+		c.Close()
+		return
+	}
+	if !key.Verify(data, sign, msg.From) {
+		c.Close()
+		return
+	}
+	log.Printf("process msg. From:%x, To:%x, Timestamp:%d\n", msg.From, msg.To, msg.Timestamp)
+
+	newContext(c, ptr.Message)
 }
 
 // Send send message
@@ -124,13 +168,19 @@ func (c *PeerSession) Send(message proto.Message) error {
 		return fmt.Errorf("fail to MarshalAny")
 	}
 	msg := crypto.Message{DataMsg: any}
+	msg.From = c.Net.publicKey
+	msg.To = c.peerID
+	msg.Timestamp = time.Now().UnixNano()
+	msg.Keygen = c.Net.selfKeygen
 	data, err := proto.Marshal(&msg)
 	if err != nil {
 		return fmt.Errorf("fail to MarshalAny")
 	}
-	if data == nil {
+	msg.Sign = c.Net.selfKey.Sign(data)
+	if msg.Sign == nil {
 		return fmt.Errorf("fail to sign")
 	}
+	data, _ = proto.Marshal(&msg)
 	l := int64(len(data))
 	if l > messageLengthLimit {
 		return fmt.Errorf("data too long:%d", l)
@@ -139,6 +189,8 @@ func (c *PeerSession) Send(message proto.Message) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("Send msg. From:%x, To:%x, Timestamp:%d\n", msg.From, msg.To, msg.Timestamp)
+
 	//defer stream.Close()
 	stream.SetDeadline(time.Now().Add(10 * time.Second))
 

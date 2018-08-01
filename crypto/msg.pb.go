@@ -31,7 +31,12 @@ var _ = math.Inf
 const _ = proto.GoGoProtoPackageIsVersion2 // please upgrade the proto package
 
 type Message struct {
-	DataMsg *google_protobuf.Any `protobuf:"bytes,1,opt,name=DataMsg" json:"DataMsg,omitempty"`
+	DataMsg   *google_protobuf.Any `protobuf:"bytes,1,opt,name=DataMsg" json:"DataMsg,omitempty"`
+	From      []byte               `protobuf:"bytes,2,opt,name=From,proto3" json:"From,omitempty"`
+	To        []byte               `protobuf:"bytes,3,opt,name=To,proto3" json:"To,omitempty"`
+	Keygen    string               `protobuf:"bytes,4,opt,name=Keygen,proto3" json:"Keygen,omitempty"`
+	Timestamp int64                `protobuf:"varint,5,opt,name=Timestamp,proto3" json:"Timestamp,omitempty"`
+	Sign      []byte               `protobuf:"bytes,6,opt,name=Sign,proto3" json:"Sign,omitempty"`
 }
 
 func (m *Message) Reset()                    { *m = Message{} }
@@ -42,6 +47,41 @@ func (*Message) Descriptor() ([]byte, []int) { return fileDescriptorMsg, []int{0
 func (m *Message) GetDataMsg() *google_protobuf.Any {
 	if m != nil {
 		return m.DataMsg
+	}
+	return nil
+}
+
+func (m *Message) GetFrom() []byte {
+	if m != nil {
+		return m.From
+	}
+	return nil
+}
+
+func (m *Message) GetTo() []byte {
+	if m != nil {
+		return m.To
+	}
+	return nil
+}
+
+func (m *Message) GetKeygen() string {
+	if m != nil {
+		return m.Keygen
+	}
+	return ""
+}
+
+func (m *Message) GetTimestamp() int64 {
+	if m != nil {
+		return m.Timestamp
+	}
+	return 0
+}
+
+func (m *Message) GetSign() []byte {
+	if m != nil {
+		return m.Sign
 	}
 	return nil
 }
@@ -74,6 +114,35 @@ func (m *Message) MarshalTo(dAtA []byte) (int, error) {
 		}
 		i += n1
 	}
+	if len(m.From) > 0 {
+		dAtA[i] = 0x12
+		i++
+		i = encodeVarintMsg(dAtA, i, uint64(len(m.From)))
+		i += copy(dAtA[i:], m.From)
+	}
+	if len(m.To) > 0 {
+		dAtA[i] = 0x1a
+		i++
+		i = encodeVarintMsg(dAtA, i, uint64(len(m.To)))
+		i += copy(dAtA[i:], m.To)
+	}
+	if len(m.Keygen) > 0 {
+		dAtA[i] = 0x22
+		i++
+		i = encodeVarintMsg(dAtA, i, uint64(len(m.Keygen)))
+		i += copy(dAtA[i:], m.Keygen)
+	}
+	if m.Timestamp != 0 {
+		dAtA[i] = 0x28
+		i++
+		i = encodeVarintMsg(dAtA, i, uint64(m.Timestamp))
+	}
+	if len(m.Sign) > 0 {
+		dAtA[i] = 0x32
+		i++
+		i = encodeVarintMsg(dAtA, i, uint64(len(m.Sign)))
+		i += copy(dAtA[i:], m.Sign)
+	}
 	return i, nil
 }
 
@@ -91,6 +160,25 @@ func (m *Message) Size() (n int) {
 	_ = l
 	if m.DataMsg != nil {
 		l = m.DataMsg.Size()
+		n += 1 + l + sovMsg(uint64(l))
+	}
+	l = len(m.From)
+	if l > 0 {
+		n += 1 + l + sovMsg(uint64(l))
+	}
+	l = len(m.To)
+	if l > 0 {
+		n += 1 + l + sovMsg(uint64(l))
+	}
+	l = len(m.Keygen)
+	if l > 0 {
+		n += 1 + l + sovMsg(uint64(l))
+	}
+	if m.Timestamp != 0 {
+		n += 1 + sovMsg(uint64(m.Timestamp))
+	}
+	l = len(m.Sign)
+	if l > 0 {
 		n += 1 + l + sovMsg(uint64(l))
 	}
 	return n
@@ -169,6 +257,147 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			}
 			if err := m.DataMsg.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
+			}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field From", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowMsg
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthMsg
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.From = append(m.From[:0], dAtA[iNdEx:postIndex]...)
+			if m.From == nil {
+				m.From = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field To", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowMsg
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthMsg
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.To = append(m.To[:0], dAtA[iNdEx:postIndex]...)
+			if m.To == nil {
+				m.To = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Keygen", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowMsg
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthMsg
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Keygen = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Timestamp", wireType)
+			}
+			m.Timestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowMsg
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Timestamp |= (int64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Sign", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowMsg
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthMsg
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Sign = append(m.Sign[:0], dAtA[iNdEx:postIndex]...)
+			if m.Sign == nil {
+				m.Sign = []byte{}
 			}
 			iNdEx = postIndex
 		default:
@@ -300,14 +529,19 @@ var (
 func init() { proto.RegisterFile("crypto/msg.proto", fileDescriptorMsg) }
 
 var fileDescriptorMsg = []byte{
-	// 133 bytes of a gzipped FileDescriptorProto
+	// 216 bytes of a gzipped FileDescriptorProto
 	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xe2, 0x12, 0x48, 0x2e, 0xaa, 0x2c,
 	0x28, 0xc9, 0xd7, 0xcf, 0x2d, 0x4e, 0xd7, 0x2b, 0x28, 0xca, 0x2f, 0xc9, 0x17, 0x62, 0x83, 0x88,
 	0x48, 0x49, 0xa6, 0xe7, 0xe7, 0xa7, 0xe7, 0xa4, 0xea, 0x83, 0x45, 0x93, 0x4a, 0xd3, 0xf4, 0x13,
-	0xf3, 0x2a, 0x21, 0x4a, 0x94, 0x2c, 0xb9, 0xd8, 0x7d, 0x53, 0x8b, 0x8b, 0x13, 0xd3, 0x53, 0x85,
-	0xf4, 0xb8, 0xd8, 0x5d, 0x12, 0x4b, 0x12, 0x7d, 0x8b, 0xd3, 0x25, 0x18, 0x15, 0x18, 0x35, 0xb8,
-	0x8d, 0x44, 0xf4, 0x20, 0xfa, 0xf4, 0x60, 0xfa, 0xf4, 0x1c, 0xf3, 0x2a, 0x83, 0x60, 0x8a, 0x9c,
-	0x04, 0x4e, 0x3c, 0x92, 0x63, 0xbc, 0xf0, 0x48, 0x8e, 0xf1, 0xc1, 0x23, 0x39, 0xc6, 0x09, 0x8f,
-	0xe5, 0x18, 0x92, 0xd8, 0xc0, 0x0a, 0x8d, 0x01, 0x01, 0x00, 0x00, 0xff, 0xff, 0xdf, 0xe9, 0x3e,
-	0x2e, 0x8a, 0x00, 0x00, 0x00,
+	0xf3, 0x2a, 0x21, 0x4a, 0x94, 0x96, 0x33, 0x72, 0xb1, 0xfb, 0xa6, 0x16, 0x17, 0x27, 0xa6, 0xa7,
+	0x0a, 0xe9, 0x71, 0xb1, 0xbb, 0x24, 0x96, 0x24, 0xfa, 0x16, 0xa7, 0x4b, 0x30, 0x2a, 0x30, 0x6a,
+	0x70, 0x1b, 0x89, 0xe8, 0x41, 0x34, 0xea, 0xc1, 0x34, 0xea, 0x39, 0xe6, 0x55, 0x06, 0xc1, 0x14,
+	0x09, 0x09, 0x71, 0xb1, 0xb8, 0x15, 0xe5, 0xe7, 0x4a, 0x30, 0x29, 0x30, 0x6a, 0xf0, 0x04, 0x81,
+	0xd9, 0x42, 0x7c, 0x5c, 0x4c, 0x21, 0xf9, 0x12, 0xcc, 0x60, 0x11, 0xa6, 0x90, 0x7c, 0x21, 0x31,
+	0x2e, 0x36, 0xef, 0xd4, 0xca, 0xf4, 0xd4, 0x3c, 0x09, 0x16, 0x05, 0x46, 0x0d, 0xce, 0x20, 0x28,
+	0x4f, 0x48, 0x86, 0x8b, 0x33, 0x24, 0x33, 0x37, 0xb5, 0xb8, 0x24, 0x31, 0xb7, 0x40, 0x82, 0x55,
+	0x81, 0x51, 0x83, 0x39, 0x08, 0x21, 0x00, 0x32, 0x39, 0x38, 0x33, 0x3d, 0x4f, 0x82, 0x0d, 0x62,
+	0x32, 0x88, 0xed, 0x24, 0x70, 0xe2, 0x91, 0x1c, 0xe3, 0x85, 0x47, 0x72, 0x8c, 0x0f, 0x1e, 0xc9,
+	0x31, 0x4e, 0x78, 0x2c, 0xc7, 0x90, 0xc4, 0x06, 0x76, 0x96, 0x31, 0x20, 0x00, 0x00, 0xff, 0xff,
+	0xec, 0xa4, 0xdb, 0x9d, 0xf9, 0x00, 0x00, 0x00,
 }

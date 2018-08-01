@@ -2,7 +2,7 @@ package libp2p
 
 import (
 	"fmt"
-	"github.com/lengzhao/libp2p/dht"
+	dht "github.com/lengzhao/libp2p/testdata"
 	"log"
 	"net/url"
 	"testing"
@@ -39,7 +39,6 @@ func TestNetwork_Listen(t *testing.T) {
 		t.Error("fail to listen")
 	}
 	n1.Close()
-	time.Sleep(1 * time.Second)
 	if n1.started {
 		t.Error("fail to close")
 	}
