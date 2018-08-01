@@ -9,15 +9,27 @@ import (
 
 // INodeID interface of node id
 type INodeID interface {
-	PublicKey() []byte
-	Addresses() []string
+	GetPublicKey() []byte
+	GetAddresses() string
 }
+
+// NodeID struct of node id
+type NodeID struct {
+	PublicKey []byte
+	Address   string
+}
+
+// GetPublicKey get public key
+func (n *NodeID) GetPublicKey() []byte { return n.PublicKey }
+
+// GetAddresses get address
+func (n *NodeID) GetAddresses() string { return n.Address }
 
 const maxBucketLen = 256
 
 func logicDist(id1, id2 INodeID) int {
-	k1 := id1.PublicKey()
-	k2 := id2.PublicKey()
+	k1 := id1.GetPublicKey()
+	k2 := id2.GetPublicKey()
 
 	var out = maxBucketLen
 	var xor byte
@@ -34,8 +46,8 @@ func logicDist(id1, id2 INodeID) int {
 }
 
 func equalID(id1, id2 INodeID) bool {
-	k1 := id1.PublicKey()
-	k2 := id2.PublicKey()
+	k1 := id1.GetPublicKey()
+	k2 := id2.GetPublicKey()
 	return bytes.Compare(k1, k2) == 0
 }
 
@@ -84,7 +96,7 @@ func (t *TDHT) Self() INodeID {
 
 // Add add the node to dht,return false if new node
 func (t *TDHT) Add(target INodeID) bool {
-	if len(t.self.PublicKey()) != len(target.PublicKey()) {
+	if len(t.self.GetPublicKey()) != len(target.GetPublicKey()) {
 		return false
 	}
 
@@ -162,19 +174,13 @@ func (t *TDHT) NodeExists(target INodeID) bool {
 
 // Find returns a list of k(count param) nodes with smallest XOR distance
 func (t *TDHT) Find(target INodeID) (nodes []INodeID) {
-	if len(t.self.PublicKey()) != len(target.PublicKey()) {
-		return []INodeID{}
-	}
-
 	bucketID := logicDist(target, t.self)
 	bucket := t.getBucket(bucketID)
 
 	bucket.mu.RLock()
-
 	for e := bucket.Front(); e != nil; e = e.Next() {
 		nodes = append(nodes, e.Value.(INodeID))
 	}
-
 	bucket.mu.RUnlock()
 
 	for i := 1; len(nodes) < BucketSize && i < maxBucketLen; i++ {

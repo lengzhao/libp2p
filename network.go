@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/url"
 	"sync"
+	"time"
 )
 
 // Network represents the current networking state for this node.
@@ -18,9 +19,8 @@ type Network struct {
 	*net.UDPConn
 	address    string
 	addr       *net.UDPAddr
-	peerKey    crypto.IPrivKey
+	selfKey    crypto.IPrivKey
 	publicKey  []byte
-	selfID     string
 	selfKeygen string
 	keygen     map[string]crypto.IKey
 	peers      map[string]*PeerSession
@@ -107,10 +107,9 @@ func (pn *Network) SetCryptoKey(keygen string, key []byte) error {
 		return fmt.Errorf("unknow keygen:%s", keygen)
 	}
 	pn.selfKeygen = keygen
-	pn.peerKey = kg.GetPrivKey(key)
-	pn.publicKey = pn.peerKey.GetPublic()
-	pn.selfID = hex.EncodeToString(pn.publicKey)
-	pn.address = fmt.Sprintf("kcp://%s@%s", pn.selfID, pn.addr.String())
+	pn.selfKey = kg.GetPrivKey(key)
+	pn.publicKey = pn.selfKey.GetPublic()
+	pn.address = fmt.Sprintf("kcp://%x@%s", pn.publicKey, pn.addr.String())
 	return nil
 }
 
@@ -126,12 +125,11 @@ func (pn *Network) setDefaultKeygen() {
 	rand.Read(key)
 	for k, v := range pn.keygen {
 		pn.selfKeygen = k
-		pn.peerKey = v.GetPrivKey(key)
+		pn.selfKey = v.GetPrivKey(key)
 		break
 	}
-	pn.publicKey = pn.peerKey.GetPublic()
-	pn.selfID = hex.EncodeToString(pn.publicKey)
-	pn.address = fmt.Sprintf("kcp://%s@%s", pn.selfID, pn.addr.String())
+	pn.publicKey = pn.selfKey.GetPublic()
+	pn.address = fmt.Sprintf("kcp://%x@%s", pn.publicKey, pn.addr.String())
 }
 
 type pkgConn struct{ *net.UDPConn }
@@ -140,10 +138,11 @@ func (c *pkgConn) WriteTo(b []byte, addr net.Addr) (int, error) { return c.Write
 
 type clientConn struct {
 	*net.UDPConn
-	rAddr  *net.UDPAddr
-	rdChan chan []byte
-	die    chan bool
-	cache  []byte
+	rAddr     *net.UDPAddr
+	rdChan    chan []byte
+	die       chan bool
+	cache     []byte
+	rdTimeout time.Duration
 }
 
 func newClientConn(conn *net.UDPConn, raddr *net.UDPAddr) *clientConn {
@@ -152,6 +151,7 @@ func newClientConn(conn *net.UDPConn, raddr *net.UDPAddr) *clientConn {
 	c.rAddr = raddr
 	c.rdChan = make(chan []byte, 10)
 	c.die = make(chan bool)
+	c.rdTimeout = time.Hour
 	log.Printf("new clientConn.from:%s, to:%s \n", conn.LocalAddr().String(), raddr.String())
 	return c
 }
@@ -174,6 +174,8 @@ func (c *clientConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
 		return c.readFromCache(b)
 	case <-c.die:
 		err = errors.New("closed")
+	case <-time.After(c.rdTimeout):
+		err = errors.New("timeout")
 	}
 	return
 }
@@ -202,6 +204,9 @@ func (c *clientConn) isClose() bool {
 	}
 	return out
 }
+func (c *clientConn) SetDeadline(t time.Time) error      { return nil }
+func (c *clientConn) SetReadDeadline(t time.Time) error  { return nil }
+func (c *clientConn) SetWriteDeadline(t time.Time) error { return nil }
 
 // Listen Listen,no block
 func (pn *Network) Listen() error {
@@ -223,7 +228,7 @@ func (pn *Network) Listen() error {
 		return err
 	}
 
-	fmt.Println("Listen address:", pn.address)
+	fmt.Println("Listen address:", pn.address, pn.listener)
 	for {
 		conn, err := pn.listener.Accept()
 		if err != nil {
@@ -293,8 +298,8 @@ func (pn *Network) closeSession(session *PeerSession) {
 }
 
 // GetID get node id
-func (pn *Network) GetID() string {
-	return pn.selfID
+func (pn *Network) GetID() []byte {
+	return pn.publicKey
 }
 
 // GetAddress get listen address
@@ -309,7 +314,8 @@ func (pn *Network) Close() error {
 		return nil
 	default:
 		close(pn.die)
-		pn.listener.Close()
+		pn.UDPConn.Close()
+		pn.started = false
 	}
 	return nil
 }
