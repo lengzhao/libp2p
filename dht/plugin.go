@@ -2,6 +2,7 @@ package dht
 
 import (
 	"github.com/lengzhao/libp2p"
+	"github.com/lengzhao/libp2p/message"
 	"log"
 )
 
@@ -22,13 +23,13 @@ func (d *DiscoveryPlugin) Startup(net *libp2p.Network) {
 // Receive is called every time when messages are received
 func (d *DiscoveryPlugin) Receive(ctx *libp2p.PluginContext) error {
 	switch msg := ctx.GetMessage().(type) {
-	case *Ping:
+	case *message.DhtPing:
 		log.Printf("ping from <%x>\n", ctx.GetRemoteID())
-	case *Pong:
+	case *message.DhtPong:
 		log.Printf("Pong from <%x>\n", ctx.GetRemoteID())
-	case *Find:
+	case *message.DhtFind:
 		log.Printf("Find from <%x>\n", ctx.GetRemoteID())
-	case *Traversal:
+	case *message.NatTraversal:
 		log.Printf("Traversal peer:<%x>, from:%s, to:%s \n", ctx.GetRemoteID(), msg.FromAddr, msg.ToAddr)
 	}
 	return nil

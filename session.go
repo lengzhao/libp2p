@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"github.com/gogo/protobuf/proto"
 	"github.com/gogo/protobuf/types"
-	"github.com/lengzhao/libp2p/crypto"
+	"github.com/lengzhao/libp2p/message"
 	"github.com/xtaci/smux"
 	"log"
 	"net"
@@ -21,11 +21,12 @@ const (
 // PeerSession peer session.
 type PeerSession struct {
 	Net        *Network
+	conn       net.Conn
 	session    *smux.Session
 	peerID     []byte
-	isServer   bool
 	remoteAddr string
 	die        chan bool
+	isServer   bool
 }
 
 func newSession(n *Network, conn net.Conn, server bool) *PeerSession {
@@ -40,8 +41,9 @@ func newSession(n *Network, conn net.Conn, server bool) *PeerSession {
 		log.Println("fail to new smux session,", err)
 		return nil
 	}
-	session.Net = n
+	session.conn = conn
 	session.isServer = server
+	session.Net = n
 	session.die = make(chan bool)
 	rAddr := conn.RemoteAddr().String()
 	n.mu.Lock()
@@ -59,6 +61,12 @@ func (c *PeerSession) Close() {
 	case <-c.die:
 		return
 	default:
+		stream, err := c.session.OpenStream()
+		if err == nil {
+			closeData := make([]byte, 20)
+			stream.Write(closeData)
+		}
+		log.Printf("PeerSession Close:%p \n", c)
 		close(c.die)
 		c.session.Close()
 		c.Net.closeSession(c)
@@ -76,6 +84,18 @@ func (c *PeerSession) receiveMsg() {
 		if err != nil {
 			log.Println("fail to AcceptStream", c.Net.address, err)
 			break
+		}
+		log.Printf("new stream.from:%s, stream:%d, isServer:%v\n", c.remoteAddr, ns.ID(), c.isServer)
+		if c.isServer {
+			if ns.ID()%2 == 0 {
+				c.session, _ = smux.Client(c.conn, nil)
+				c.isServer = false
+			}
+		} else {
+			if ns.ID()%2 == 1 {
+				c.session, _ = smux.Server(c.conn, nil)
+				c.isServer = true
+			}
 		}
 		go c.process(ns)
 	}
@@ -98,6 +118,7 @@ func (c *PeerSession) process(ns *smux.Stream) {
 	l, _ := binary.Varint(data)
 	if l == 0 || l > messageLengthLimit {
 		log.Println("error data length:", l)
+		c.Close()
 		return
 	}
 	data = make([]byte, l)
@@ -115,9 +136,9 @@ func (c *PeerSession) process(ns *smux.Stream) {
 		log.Println("error data length:", n, "<", l)
 		return
 	}
-	log.Println("receive data form:", c.GetRemoteAddress(), len(data))
+	log.Printf("process. receive data form:%s,length:%d, stream id:%d \n", c.GetRemoteAddress(), len(data), ns.ID())
 
-	var msg crypto.Message
+	var msg message.NetMessage
 	err = proto.Unmarshal(data, &msg)
 	if err != nil {
 		c.Close()
@@ -127,8 +148,12 @@ func (c *PeerSession) process(ns *smux.Stream) {
 		c.Close()
 		return
 	}
-	if c.isServer && c.peerID == nil {
+	if c.peerID == nil {
 		c.peerID = msg.From
+	}
+	if c.peerID == nil {
+		c.Close()
+		return
 	}
 	if bytes.Compare(msg.From, c.peerID) != 0 {
 		c.Close()
@@ -162,12 +187,16 @@ func (c *PeerSession) process(ns *smux.Stream) {
 }
 
 // Send send message
-func (c *PeerSession) Send(message proto.Message) error {
-	any, err := types.MarshalAny(message)
+func (c *PeerSession) Send(userMsg proto.Message) error {
+	stream, err := c.session.OpenStream()
+	if err != nil {
+		return err
+	}
+	any, err := types.MarshalAny(userMsg)
 	if err != nil {
 		return fmt.Errorf("fail to MarshalAny")
 	}
-	msg := crypto.Message{DataMsg: any}
+	msg := message.NetMessage{DataMsg: any}
 	msg.From = c.Net.publicKey
 	msg.To = c.peerID
 	msg.Timestamp = time.Now().UnixNano()
@@ -184,10 +213,6 @@ func (c *PeerSession) Send(message proto.Message) error {
 	l := int64(len(data))
 	if l > messageLengthLimit {
 		return fmt.Errorf("data too long:%d", l)
-	}
-	stream, err := c.session.OpenStream()
-	if err != nil {
-		return err
 	}
 	log.Printf("Send msg. From:%x, To:%x, Timestamp:%d\n", msg.From, msg.To, msg.Timestamp)
 
