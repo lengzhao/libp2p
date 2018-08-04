@@ -30,6 +30,7 @@ type Network struct {
 	die        chan bool
 	mu         sync.Mutex
 	listener   net.Listener
+	timeWait   []*clientConn
 }
 
 // NewNetwork create a new network,listen the addr
@@ -58,6 +59,7 @@ func NewNetwork(addrStr string) *Network {
 	pn.keygen = make(map[string]crypto.IKey)
 	pn.clientRCV = make(map[string]*clientConn)
 	pn.die = make(chan bool)
+	pn.timeWait = make([]*clientConn, 0)
 	return pn
 }
 
@@ -137,8 +139,9 @@ type pkgConn struct{ *net.UDPConn }
 func (c *pkgConn) WriteTo(b []byte, addr net.Addr) (int, error) { return c.Write(b) }
 
 type clientConn struct {
-	*net.UDPConn
+	conn      *net.UDPConn
 	rAddr     *net.UDPAddr
+	rAddrStr  string
 	rdChan    chan []byte
 	die       chan bool
 	cache     []byte
@@ -147,8 +150,9 @@ type clientConn struct {
 
 func newClientConn(conn *net.UDPConn, raddr *net.UDPAddr) *clientConn {
 	c := new(clientConn)
-	c.UDPConn = conn
+	c.conn = conn
 	c.rAddr = raddr
+	c.rAddrStr = raddr.String()
 	c.rdChan = make(chan []byte, 10)
 	c.die = make(chan bool)
 	c.rdTimeout = time.Hour
@@ -162,7 +166,7 @@ func (c *clientConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 		return 0, errors.New("closed")
 	}
 	log.Printf("client write to %s,len:%d\n", c.rAddr.String(), len(b))
-	return c.UDPConn.WriteTo(b, c.rAddr)
+	return c.conn.WriteTo(b, c.rAddr)
 }
 
 func (c *clientConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
@@ -203,6 +207,19 @@ func (c *clientConn) isClose() bool {
 		out = false
 	}
 	return out
+}
+
+func (c *clientConn) LocalAddr() net.Addr {
+	return c.conn.LocalAddr()
+}
+
+func (c *clientConn) Close() error {
+	select {
+	case <-c.die:
+	default:
+		close(c.die)
+	}
+	return nil
 }
 func (c *clientConn) SetDeadline(t time.Time) error      { return nil }
 func (c *clientConn) SetReadDeadline(t time.Time) error  { return nil }
@@ -260,19 +277,15 @@ func (pn *Network) NewSession(addr string) *PeerSession {
 		return nil
 	}
 	pn.mu.Lock()
+	pn.checkTimeWait()
 	session, ok := pn.peers[u.Host]
 	pn.mu.Unlock()
 	if ok {
+		if len(session.peerID) == 0 {
+			session.peerID = id
+		}
 		return session
 	}
-	// laddr, _ := net.ResolveUDPAddr("udp", "0.0.0.0:0")
-	// raddr, _ := net.ResolveUDPAddr("udp", u.Host)
-	// udpConn, err := net.DialUDP("udp", laddr, raddr)
-	// if err != nil {
-	// 	log.Println("fail to dail udp:", laddr.String(), u.Host)
-	// }
-	// conn, err := kcp.NewConn(u.Host, nil, 0, 0, &pkgConn{UDPConn: udpConn})
-
 	raddr, _ := net.ResolveUDPAddr("udp", u.Host)
 	c := newClientConn(pn.UDPConn, raddr)
 	pn.clientRCV[raddr.String()] = c
@@ -281,20 +294,53 @@ func (pn *Network) NewSession(addr string) *PeerSession {
 		return nil
 	}
 
-	ps := newSession(pn, conn, false)
-	ps.peerID = id
-	return ps
+	session = newSession(pn, conn, false)
+
+	session.peerID = id
+	return session
 }
 
 func (pn *Network) closeSession(session *PeerSession) {
 	pn.mu.Lock()
 	defer pn.mu.Unlock()
 	rcv, ok := pn.clientRCV[session.remoteAddr]
-	if ok {
+	if !ok {
+		rcv = new(clientConn)
+		rcv.die = make(chan bool)
 		close(rcv.die)
-		delete(pn.clientRCV, session.remoteAddr)
 	}
-	delete(pn.peers, session.remoteAddr)
+	rcv.rAddrStr = session.remoteAddr
+	rcv.rdTimeout = time.Duration(time.Now().Add(time.Second * 5).UnixNano())
+	pn.timeWait = append(pn.timeWait, rcv)
+	log.Printf("network add timewait:%p, peer:%s\n", pn, session.remoteAddr)
+	pn.checkTimeWait()
+}
+
+func (pn *Network) checkTimeWait() {
+	if len(pn.timeWait) == 0 {
+		return
+	}
+	delNum := 0
+	now := time.Duration(time.Now().UnixNano())
+	for _, rcv := range pn.timeWait {
+		if rcv.rdTimeout > now {
+			break
+		}
+		delNum++
+	}
+	if len(pn.timeWait) > 10000 && delNum == 0 {
+		delNum = 1
+	}
+	if delNum == 0 {
+		return
+	}
+	for i := 0; i < delNum; i++ {
+		rcv := pn.timeWait[i]
+		log.Printf("network delete peer,net:%p, peer:%s\n", pn, rcv.rAddrStr)
+		delete(pn.peers, rcv.rAddrStr)
+		delete(pn.clientRCV, rcv.rAddrStr)
+	}
+	pn.timeWait = pn.timeWait[delNum:]
 }
 
 // GetID get node id
@@ -327,8 +373,9 @@ func (pn *Network) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
 		if err != nil {
 			return
 		}
-		log.Printf("Network receive data.from:%s, len:%d \n", addr.String(), n)
+		log.Printf("Network receive data.net:%p, from:%s, len:%d\n", pn, addr.String(), n)
 		pn.mu.Lock()
+		pn.checkTimeWait()
 		rcv, ok := pn.clientRCV[addr.String()]
 		pn.mu.Unlock()
 		if !ok {

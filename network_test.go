@@ -2,7 +2,7 @@ package libp2p
 
 import (
 	"fmt"
-	dht "github.com/lengzhao/libp2p/testdata"
+	"github.com/lengzhao/libp2p/message"
 	"log"
 	"net/url"
 	"testing"
@@ -52,12 +52,13 @@ type PingPlugin struct {
 
 func (state *PingPlugin) Receive(ctx *PluginContext) error {
 	switch msg := ctx.GetMessage().(type) {
-	case *dht.Pong:
+	case *message.DhtPong:
 		fmt.Printf("Pong <%s> %s\n", ctx.GetRemoteID(), msg.String())
 		state.pongCount++
-	case *dht.Ping:
+	case *message.DhtPing:
 		fmt.Printf("ping <%s> %s\n", ctx.GetRemoteID(), msg.String())
 		state.pingCount++
+		ctx.Reply(new(message.DhtPong))
 	}
 
 	return nil
@@ -69,6 +70,66 @@ func TestNetwork_NewSession(t *testing.T) {
 	n2 := NewNetwork("kcp://127.0.0.1:3001")
 	plug := new(PingPlugin)
 	n1.AddPlugin(plug)
+	n2.AddPlugin(plug)
+	go n1.Listen()
+	go n2.Listen()
+	time.Sleep(1 * time.Second)
+	n1Addr := n1.GetAddress()
+	// n2->n1
+	session := n2.NewSession(n1Addr)
+	if session == nil {
+		t.Error("fail to new session from n2->n1. n1.address:", n1Addr)
+		return
+	}
+	fmt.Println("n2->n1. ", n2.GetAddress(), " --> ", n1Addr)
+
+	err := session.Send(&message.DhtPing{})
+	if err != nil {
+		t.Error("fail to send msg.", err)
+		return
+	}
+	time.Sleep(1 * time.Second)
+	//session.Close()
+	if plug.pingCount != 1 {
+		t.Errorf("hope server receive Ping message.%d\n", plug.pingCount)
+	}
+	if plug.pongCount != 1 {
+		t.Errorf("hope server receive Pong message.%d\n", plug.pongCount)
+	}
+
+	// n1->n2
+	session = n1.NewSession(n2.GetAddress())
+	if session == nil {
+		t.Error("fail to new session from n2->n1. n1.address:", n1Addr)
+		return
+	}
+	fmt.Println("n2->n1. ", n2.GetAddress(), " --> ", n1Addr)
+
+	err = session.Send(&message.DhtPing{})
+	if err != nil {
+		t.Error("fail to send msg.", err)
+		return
+	}
+	time.Sleep(1 * time.Second)
+	if plug.pingCount != 2 {
+		t.Errorf("hope server receive Ping message.%d\n", plug.pingCount)
+	}
+	if plug.pongCount != 2 {
+		t.Errorf("hope server receive Pong message.%d\n", plug.pongCount)
+	}
+	session.Close()
+	n1.Close()
+	n2.Close()
+	//t.Error("stop")
+}
+
+func TestNetwork_NewSession2(t *testing.T) {
+	log.SetFlags(log.Lshortfile)
+	n1 := NewNetwork("kcp://127.0.0.1:3000")
+	n2 := NewNetwork("kcp://127.0.0.1:3001")
+	plug := new(PingPlugin)
+	n1.AddPlugin(plug)
+	n2.AddPlugin(plug)
 	go n1.Listen()
 	go n2.Listen()
 	time.Sleep(1 * time.Second)
@@ -80,17 +141,44 @@ func TestNetwork_NewSession(t *testing.T) {
 	}
 	fmt.Println("n2->n1. ", n2.GetAddress(), " --> ", n1Addr)
 
-	err := session.Send(&dht.Ping{})
+	err := session.Send(&message.DhtPing{})
 	if err != nil {
 		t.Error("fail to send msg.", err)
 		return
 	}
 	time.Sleep(1 * time.Second)
 	session.Close()
-	n1.Close()
-	n2.Close()
 	if plug.pingCount != 1 {
 		t.Errorf("hope server receive Ping message.%d\n", plug.pingCount)
 	}
+	if plug.pongCount != 1 {
+		t.Errorf("hope server receive Pong message.%d\n", plug.pongCount)
+	}
+
+	// the session of n2->n1 is closed,time wait
+	time.Sleep(6 * time.Second)
+	// reconnect
+	session = n1.NewSession(n2.GetAddress())
+	if session == nil {
+		t.Error("fail to new session from n2->n1. n1.address:", n1Addr)
+		return
+	}
+	fmt.Println("n2->n1. ", n2.GetAddress(), " --> ", n1Addr)
+
+	err = session.Send(&message.DhtPing{})
+	if err != nil {
+		t.Error("fail to send msg.", err)
+		return
+	}
+	time.Sleep(1 * time.Second)
+	if plug.pingCount != 2 {
+		t.Errorf("hope server receive Ping message.%d\n", plug.pingCount)
+	}
+	if plug.pongCount != 2 {
+		t.Errorf("hope server receive Pong message.%d\n", plug.pongCount)
+	}
+	session.Close()
+	n1.Close()
+	n2.Close()
 	//t.Error("stop")
 }
