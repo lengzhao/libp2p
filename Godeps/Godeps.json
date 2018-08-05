@@ -1,6 +1,6 @@
 {
 	"ImportPath": "github.com/lengzhao/libp2p",
-	"GoVersion": "go1.9",
+	"GoVersion": "go1.10",
 	"GodepVersion": "v80",
 	"Deps": [
 		{

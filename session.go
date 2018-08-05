@@ -3,13 +3,14 @@ package libp2p
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"github.com/gogo/protobuf/proto"
 	"github.com/gogo/protobuf/types"
 	"github.com/lengzhao/libp2p/message"
+	"github.com/xtaci/kcp-go"
 	"github.com/xtaci/smux"
 	"log"
-	"net"
 	// "runtime/debug"
 	"time"
 )
@@ -21,15 +22,16 @@ const (
 // PeerSession peer session.
 type PeerSession struct {
 	Net        *Network
-	conn       net.Conn
+	conn       *kcp.UDPSession
 	session    *smux.Session
 	peerID     []byte
 	remoteAddr string
 	die        chan bool
 	isServer   bool
+	connEvent  bool
 }
 
-func newSession(n *Network, conn net.Conn, server bool) *PeerSession {
+func newSession(n *Network, conn *kcp.UDPSession, server bool) *PeerSession {
 	session := new(PeerSession)
 	var err error
 	if server {
@@ -50,52 +52,72 @@ func newSession(n *Network, conn net.Conn, server bool) *PeerSession {
 	n.peers[rAddr] = session
 	n.mu.Unlock()
 	session.remoteAddr = rAddr
-	log.Println("new connection:", rAddr, server)
+	log.Println("new connection:", rAddr)
 	go session.receiveMsg()
 	return session
 }
 
+func (c *PeerSession) isClose() bool {
+	select {
+	case <-c.die:
+		return true
+	default:
+	}
+	return false
+}
+
 // Close Close
-func (c *PeerSession) Close() {
+func (c *PeerSession) Close(grace bool) {
 	select {
 	case <-c.die:
 		return
 	default:
-		stream, err := c.session.OpenStream()
-		if err == nil {
-			closeData := make([]byte, 20)
-			stream.Write(closeData)
+		if grace {
+			stream, err := c.session.OpenStream()
+			if err == nil {
+				closeData := make([]byte, 20)
+				stream.Write(closeData)
+			}
 		}
-		log.Printf("PeerSession Close:%p \n", c)
+		log.Printf("PeerSession Close:%p ,address:%s\n", c, c.GetRemoteAddress())
 		close(c.die)
 		c.session.Close()
 		c.Net.closeSession(c)
 	}
 }
 
-func (c *PeerSession) receiveMsg() {
-	defer c.Close()
+func (c *PeerSession) eventConnect(peerID []byte) {
+	if c.connEvent {
+		return
+	}
+	if len(peerID) == 0 && len(c.peerID) == 0 {
+		return
+	}
+
+	if len(c.peerID) == 0 {
+		c.peerID = peerID
+	}
+	c.connEvent = true
+
 	for _, plugin := range c.Net.pulgins {
 		plugin.PeerConnect(c)
+	}
+}
+func (c *PeerSession) eventDisConnect() {
+	for _, plugin := range c.Net.pulgins {
 		defer plugin.PeerDisconnect(c)
 	}
+}
+
+func (c *PeerSession) receiveMsg() {
+	defer c.Close(false)
+	c.eventConnect(nil)
+	defer c.eventDisConnect()
 	for {
 		ns, err := c.session.AcceptStream()
 		if err != nil {
-			log.Println("fail to AcceptStream", c.Net.address, err)
+			// log.Println("fail to AcceptStream", c.Net.address, err)
 			break
-		}
-		log.Printf("new stream.from:%s, stream:%d, isServer:%v\n", c.remoteAddr, ns.ID(), c.isServer)
-		if c.isServer {
-			if ns.ID()%2 == 0 {
-				c.session, _ = smux.Client(c.conn, nil)
-				c.isServer = false
-			}
-		} else {
-			if ns.ID()%2 == 1 {
-				c.session, _ = smux.Server(c.conn, nil)
-				c.isServer = true
-			}
 		}
 		go c.process(ns)
 	}
@@ -103,7 +125,6 @@ func (c *PeerSession) receiveMsg() {
 
 func (c *PeerSession) process(ns *smux.Stream) {
 	defer func() {
-		ns.Close()
 		if err := recover(); err != nil {
 			fmt.Println("process painc:", err)
 		}
@@ -118,7 +139,7 @@ func (c *PeerSession) process(ns *smux.Stream) {
 	l, _ := binary.Varint(data)
 	if l == 0 || l > messageLengthLimit {
 		log.Println("error data length:", l)
-		c.Close()
+		c.Close(true)
 		return
 	}
 	data = make([]byte, l)
@@ -136,29 +157,32 @@ func (c *PeerSession) process(ns *smux.Stream) {
 		log.Println("error data length:", n, "<", l)
 		return
 	}
-	log.Printf("process. receive data form:%s,length:%d, stream id:%d \n", c.GetRemoteAddress(), len(data), ns.ID())
+	// log.Printf("process. receive data form:%s,length:%d, stream id:%d \n", c.GetRemoteAddress(), len(data), ns.ID())
 
 	var msg message.NetMessage
 	err = proto.Unmarshal(data, &msg)
 	if err != nil {
-		c.Close()
+		c.Close(true)
 		return
 	}
 	if bytes.Compare(msg.To, c.Net.publicKey) != 0 {
-		c.Close()
+		c.Close(true)
 		return
 	}
-	if c.peerID == nil {
-		c.peerID = msg.From
-	}
-	if c.peerID == nil {
-		c.Close()
+	if len(msg.From) == 0 {
+		c.Close(true)
 		return
 	}
+	// as a server, unknow peer id, update just now
+	c.eventConnect(msg.From)
 	if bytes.Compare(msg.From, c.peerID) != 0 {
-		c.Close()
+		c.Close(true)
 		return
 	}
+	if c.isClose() {
+		return
+	}
+
 	if msg.Timestamp > time.Now().Add(time.Minute).UnixNano() ||
 		msg.Timestamp < time.Now().Add(-time.Minute).UnixNano() {
 		return
@@ -166,7 +190,7 @@ func (c *PeerSession) process(ns *smux.Stream) {
 	var ptr types.DynamicAny
 	err = types.UnmarshalAny(msg.DataMsg, &ptr)
 	if err != nil {
-		c.Close()
+		c.Close(true)
 		return
 	}
 	sign := msg.Sign
@@ -174,24 +198,28 @@ func (c *PeerSession) process(ns *smux.Stream) {
 	data, _ = proto.Marshal(&msg)
 	key, ok := c.Net.keygen[msg.Keygen]
 	if !ok {
-		c.Close()
+		c.Close(true)
 		return
 	}
 	if !key.Verify(data, sign, msg.From) {
-		c.Close()
+		c.Close(true)
 		return
 	}
-	log.Printf("process msg. From:%x, To:%x, Timestamp:%d\n", msg.From, msg.To, msg.Timestamp)
+	// log.Printf("process msg. From:%x, To:%x, Timestamp:%d\n", msg.From, msg.To, msg.Timestamp)
 
 	newContext(c, ptr.Message)
 }
 
 // Send send message
 func (c *PeerSession) Send(userMsg proto.Message) error {
+	if c.isClose() {
+		return errors.New("closed")
+	}
 	stream, err := c.session.OpenStream()
 	if err != nil {
 		return err
 	}
+	defer stream.Close()
 	any, err := types.MarshalAny(userMsg)
 	if err != nil {
 		return fmt.Errorf("fail to MarshalAny")
@@ -214,7 +242,7 @@ func (c *PeerSession) Send(userMsg proto.Message) error {
 	if l > messageLengthLimit {
 		return fmt.Errorf("data too long:%d", l)
 	}
-	log.Printf("Send msg. From:%x, To:%x, Timestamp:%d\n", msg.From, msg.To, msg.Timestamp)
+	// log.Printf("Send msg. From:%x, To:%x, Timestamp:%d\n", msg.From, msg.To, msg.Timestamp)
 
 	//defer stream.Close()
 	stream.SetDeadline(time.Now().Add(10 * time.Second))
@@ -226,12 +254,20 @@ func (c *PeerSession) Send(userMsg proto.Message) error {
 		return err
 	}
 	_, err = stream.Write(data)
-	log.Println("send data length:", l, ", stream id:", stream.ID())
+	// log.Println("send data length:", l, ", stream id:", stream.ID())
 	return err
 }
 
 // GetRemoteAddress get remote address. kcp://publicKey@host:port
 func (c *PeerSession) GetRemoteAddress() string {
+	if c.peerID == nil {
+		return ""
+	}
 	addr := fmt.Sprintf("kcp://%x@%s", c.peerID, c.remoteAddr)
 	return addr
+}
+
+// GetPeerID get peer id
+func (c *PeerSession) GetPeerID() []byte {
+	return c.peerID
 }
