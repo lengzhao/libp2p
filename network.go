@@ -1,10 +1,13 @@
 package libp2p
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/gogo/protobuf/proto"
 	"github.com/lengzhao/libp2p/crypto"
+	"github.com/lengzhao/libp2p/message"
 	"github.com/xtaci/kcp-go"
 	"log"
 	"math/rand"
@@ -29,7 +32,7 @@ type Network struct {
 	started    bool
 	die        chan bool
 	mu         sync.Mutex
-	listener   net.Listener
+	listener   *kcp.Listener
 	timeWait   []*clientConn
 }
 
@@ -124,6 +127,7 @@ func (pn *Network) setDefaultKeygen() {
 		return
 	}
 	key := make([]byte, 6)
+	rand.Seed(time.Now().UnixNano())
 	rand.Read(key)
 	for k, v := range pn.keygen {
 		pn.selfKeygen = k
@@ -134,10 +138,6 @@ func (pn *Network) setDefaultKeygen() {
 	pn.address = fmt.Sprintf("kcp://%x@%s", pn.publicKey, pn.addr.String())
 }
 
-type pkgConn struct{ *net.UDPConn }
-
-func (c *pkgConn) WriteTo(b []byte, addr net.Addr) (int, error) { return c.Write(b) }
-
 type clientConn struct {
 	conn      *net.UDPConn
 	rAddr     *net.UDPAddr
@@ -146,6 +146,8 @@ type clientConn struct {
 	die       chan bool
 	cache     []byte
 	rdTimeout time.Duration
+	kcpConv   uint32
+	rdNum     uint64
 }
 
 func newClientConn(conn *net.UDPConn, raddr *net.UDPAddr) *clientConn {
@@ -165,7 +167,7 @@ func (c *clientConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	if c.isClose() {
 		return 0, errors.New("closed")
 	}
-	log.Printf("client write to %s,len:%d\n", c.rAddr.String(), len(b))
+	// log.Printf("write to %s,len:%d\n", c.rAddr.String(), len(b))
 	return c.conn.WriteTo(b, c.rAddr)
 }
 
@@ -237,6 +239,7 @@ func (pn *Network) Listen() error {
 
 	pn.UDPConn, err = net.ListenUDP("udp", pn.addr)
 	if err != nil {
+		log.Println("fail to listen:", pn.addr.String())
 		return err
 	}
 	//pn.listener, err = kcp.ServeConn(nil, 0, 0, pn.UDPConn)
@@ -245,9 +248,13 @@ func (pn *Network) Listen() error {
 		return err
 	}
 
-	fmt.Println("Listen address:", pn.address, pn.listener)
+	fmt.Println("Listen address:", pn.address)
+	for _, plugin := range pn.pulgins {
+		plugin.Startup(pn)
+		defer plugin.Cleanup(pn)
+	}
 	for {
-		conn, err := pn.listener.Accept()
+		conn, err := pn.listener.AcceptKCP()
 		if err != nil {
 			break
 		}
@@ -279,21 +286,32 @@ func (pn *Network) NewSession(addr string) *PeerSession {
 	pn.mu.Lock()
 	pn.checkTimeWait()
 	session, ok := pn.peers[u.Host]
-	pn.mu.Unlock()
-	if ok {
+	if ok && session.isClose() {
+		rcv, ok := pn.clientRCV[u.Host]
+		if ok {
+			rcv.rdTimeout = 0
+		}
+		delete(pn.peers, u.Host)
+		delete(pn.clientRCV, u.Host)
+
+	} else if ok {
 		if len(session.peerID) == 0 {
 			session.peerID = id
 		}
+		pn.mu.Unlock()
 		return session
 	}
+	pn.mu.Unlock()
 	raddr, _ := net.ResolveUDPAddr("udp", u.Host)
 	c := newClientConn(pn.UDPConn, raddr)
-	pn.clientRCV[raddr.String()] = c
 	conn, err := kcp.NewConn(u.Host, nil, 0, 0, c)
 	if err != nil {
 		return nil
 	}
-
+	c.kcpConv = conn.GetConv()
+	pn.mu.Lock()
+	pn.clientRCV[raddr.String()] = c
+	pn.mu.Unlock()
 	session = newSession(pn, conn, false)
 
 	session.peerID = id
@@ -310,9 +328,10 @@ func (pn *Network) closeSession(session *PeerSession) {
 		close(rcv.die)
 	}
 	rcv.rAddrStr = session.remoteAddr
+	rcv.kcpConv = session.conn.GetConv()
 	rcv.rdTimeout = time.Duration(time.Now().Add(time.Second * 5).UnixNano())
 	pn.timeWait = append(pn.timeWait, rcv)
-	log.Printf("network add timewait:%p, peer:%s\n", pn, session.remoteAddr)
+	// log.Printf("network add timewait:%p, peer:%s\n", pn, session.remoteAddr)
 	pn.checkTimeWait()
 }
 
@@ -336,6 +355,9 @@ func (pn *Network) checkTimeWait() {
 	}
 	for i := 0; i < delNum; i++ {
 		rcv := pn.timeWait[i]
+		if rcv.rdTimeout == 0 {
+			continue
+		}
 		log.Printf("network delete peer,net:%p, peer:%s\n", pn, rcv.rAddrStr)
 		delete(pn.peers, rcv.rAddrStr)
 		delete(pn.clientRCV, rcv.rAddrStr)
@@ -373,7 +395,8 @@ func (pn *Network) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
 		if err != nil {
 			return
 		}
-		log.Printf("Network receive data.net:%p, from:%s, len:%d\n", pn, addr.String(), n)
+		conv := binary.LittleEndian.Uint32(b)
+		// log.Printf("Network receive data.net:%p, from:%s, len:%d,conv:%d\n", pn, addr.String(), n, conv)
 		pn.mu.Lock()
 		pn.checkTimeWait()
 		rcv, ok := pn.clientRCV[addr.String()]
@@ -381,16 +404,85 @@ func (pn *Network) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
 		if !ok {
 			break
 		}
+		//newwork NAT:new conn,but not reply(droped). then receive peer msg with different kcpConv
+		if rcv.rdNum == 0 && rcv.kcpConv != conv {
+			pn.mu.Lock()
+			s, ok := pn.peers[rcv.rAddrStr]
+			pn.mu.Unlock()
+			if ok {
+				s.Close(false)
+				return
+			}
+		}
+
 		buff := make([]byte, n)
 		copy(buff, b)
 		select {
 		case <-rcv.die:
 			//closed,drop the data
+			//check queal conv
+			conv := binary.LittleEndian.Uint32(buff)
+			// log.Println("client closed:", rcv.rAddrStr, conv, n)
+			if conv != rcv.kcpConv {
+				// log.Println("different conv,remove local session")
+				pn.mu.Lock()
+				defer pn.mu.Unlock()
+				delete(pn.peers, rcv.rAddrStr)
+				delete(pn.clientRCV, rcv.rAddrStr)
+				rcv.rdTimeout = 0
+				return
+			}
 			continue
 		case rcv.rdChan <- buff:
-			log.Printf("client receive data.from:%s, len:%d \n", addr.String(), n)
+			// log.Printf("client receive data.from:%s, len:%d \n", addr.String(), n)
+			if rcv.kcpConv != conv {
+				log.Printf("client receive error data.from:%s, len:%d,selfConv:%d,conv:%d \n", addr.String(), n, rcv.kcpConv, conv)
+			}
+			rcv.rdNum++
 		}
 	}
 
 	return
+}
+
+// Bootstrap connect peers,send message.DhtPing
+func (pn *Network) Bootstrap(addresses ...string) {
+	for _, addr := range addresses {
+		session := pn.NewSession(addr)
+		session.Send(&message.DhtPing{})
+	}
+}
+
+// Broadcast send message to all peer clients.
+func (pn *Network) Broadcast(message proto.Message) {
+	pn.mu.Lock()
+	peers := make([]*PeerSession, 0, len(pn.peers))
+	for _, peer := range pn.peers {
+		peers = append(peers, peer)
+	}
+	pn.mu.Unlock()
+	for _, peer := range peers {
+		peer.Send(message)
+	}
+}
+
+// RandomSend random send message to one peer
+func (pn *Network) RandomSend(message proto.Message) {
+	var peer *PeerSession
+	pn.mu.Lock()
+	if len(pn.peers) == 0 {
+		return
+	}
+	ri := rand.Uint32() % uint32(len(pn.peers))
+	var index uint32
+	for _, p := range pn.peers {
+		peer = p
+		if index < ri {
+			index++
+			continue
+		}
+		break
+	}
+	pn.mu.Unlock()
+	peer.Send(message)
 }

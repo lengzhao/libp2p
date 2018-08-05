@@ -94,7 +94,7 @@ func (t *TDHT) Self() INodeID {
 	return t.self
 }
 
-// Add add the node to dht,return false if new node
+// Add add the node to dht,return true if new node
 func (t *TDHT) Add(target INodeID) bool {
 	if len(t.self.GetPublicKey()) != len(target.GetPublicKey()) {
 		return false
@@ -114,8 +114,9 @@ func (t *TDHT) Add(target INodeID) bool {
 	}
 	if bucket.Len() <= BucketSize {
 		bucket.PushFront(target)
+		return true
 	}
-	return true
+	return false
 }
 
 func hexString(in []byte) string {
