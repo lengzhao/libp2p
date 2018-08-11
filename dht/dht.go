@@ -31,7 +31,7 @@ func logicDist(id1, id2 INodeID) int {
 	k1 := id1.GetPublicKey()
 	k2 := id2.GetPublicKey()
 
-	var out = maxBucketLen
+	var out = maxBucketLen - 1
 	var xor byte
 	for i := 0; i < len(k1) && i < len(k2) && i < maxBucketLen/8; i++ {
 		xor = k1[i] ^ k2[i]
