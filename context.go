@@ -19,7 +19,7 @@ func newContext(c *PeerSession, message proto.Message) error {
 	for _, plugin := range c.Net.pulgins {
 		err := plugin.Receive(ctx)
 		if err != nil {
-			log.Println("fail to do plugin.Receive.", plugin)
+			log.Println("fail to do plugin.Receive.", plugin, err, message)
 		}
 	}
 	return nil

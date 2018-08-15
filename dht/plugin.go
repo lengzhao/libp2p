@@ -14,10 +14,11 @@ import (
 // DiscoveryPlugin discovery plugin of dht
 type DiscoveryPlugin struct {
 	*libp2p.Plugin
-	mu    sync.Mutex
-	self  []byte
-	dht   *TDHT
-	conns map[string]bool
+	mu            sync.Mutex
+	self          []byte
+	dht           *TDHT
+	conns         map[string]bool
+	lastDiscovery int64
 }
 
 // Startup is called only once when the plugin is loaded
@@ -28,10 +29,14 @@ func (d *DiscoveryPlugin) Startup(net *libp2p.Network) {
 	d.self = node.PublicKey
 	d.dht = CreateDHT(node)
 	d.conns = make(map[string]bool)
+	d.lastDiscovery = time.Now().Unix()
 }
 
 // Receive is called every time when messages are received
 func (d *DiscoveryPlugin) Receive(ctx *libp2p.PluginContext) error {
+	if time.Now().Unix() > d.lastDiscovery+7200 {
+		ctx.Session.Net.Broadcast(new(message.DhtFind))
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	switch msg := ctx.GetMessage().(type) {
@@ -64,6 +69,7 @@ func (d *DiscoveryPlugin) Receive(ctx *libp2p.PluginContext) error {
 		}
 		ctx.Reply(resp)
 	case *message.DhtNodes:
+		d.lastDiscovery = time.Now().Unix()
 		for _, addr := range msg.Addresses {
 			pu, err := url.Parse(addr)
 			if err != nil {
