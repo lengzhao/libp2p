@@ -1,6 +1,7 @@
 package libp2p
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -100,6 +101,19 @@ func (pn *Network) AddKeygen(keys ...crypto.IKey) error {
 	return nil
 }
 
+func getIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "0.0.0.0"
+	}
+	for _, address := range addrs {
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			return ipnet.IP.String()
+		}
+	}
+	return "0.0.0.0"
+}
+
 // SetCryptoKey set local sing key
 func (pn *Network) SetCryptoKey(keygen string, key []byte) error {
 	if pn.started {
@@ -114,7 +128,11 @@ func (pn *Network) SetCryptoKey(keygen string, key []byte) error {
 	pn.selfKeygen = keygen
 	pn.selfKey = kg.GetPrivKey(key)
 	pn.publicKey = pn.selfKey.GetPublic()
-	pn.address = fmt.Sprintf("kcp://%x@%s", pn.publicKey, pn.addr.String())
+	if pn.addr.IP.String() == "0.0.0.0" {
+		pn.address = fmt.Sprintf("kcp://%x@%s:%d", pn.publicKey, getIP(), pn.addr.Port)
+	} else {
+		pn.address = fmt.Sprintf("kcp://%x@%s", pn.publicKey, pn.addr.String())
+	}
 	return nil
 }
 
@@ -129,13 +147,11 @@ func (pn *Network) setDefaultKeygen() {
 	key := make([]byte, 6)
 	rand.Seed(time.Now().UnixNano())
 	rand.Read(key)
-	for k, v := range pn.keygen {
+	for k := range pn.keygen {
 		pn.selfKeygen = k
-		pn.selfKey = v.GetPrivKey(key)
 		break
 	}
-	pn.publicKey = pn.selfKey.GetPublic()
-	pn.address = fmt.Sprintf("kcp://%x@%s", pn.publicKey, pn.addr.String())
+	pn.SetCryptoKey(pn.selfKeygen, key)
 }
 
 type clientConn struct {
@@ -233,9 +249,9 @@ func (pn *Network) Listen() error {
 	if pn.started {
 		return fmt.Errorf("network started")
 	}
+	pn.setDefaultKeygen()
 	pn.started = true
 	defer func() { pn.started = false }()
-	pn.setDefaultKeygen()
 
 	pn.UDPConn, err = net.ListenUDP("udp", pn.addr)
 	if err != nil {
@@ -281,6 +297,9 @@ func (pn *Network) NewSession(addr string) *PeerSession {
 	id, err := hex.DecodeString(u.User.Username())
 	if err != nil {
 		log.Println("error publicKey,not hex string:", u.User.Username())
+		return nil
+	}
+	if bytes.Compare(id, pn.publicKey) == 0 {
 		return nil
 	}
 	pn.mu.Lock()

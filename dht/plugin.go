@@ -11,18 +11,13 @@ import (
 	"time"
 )
 
-type tReconnectNode struct {
-	timeout int64
-	address string
-}
-
 // DiscoveryPlugin discovery plugin of dht
 type DiscoveryPlugin struct {
 	*libp2p.Plugin
-	mu     sync.Mutex
-	self   []byte
-	dht    *TDHT
-	rcList []*tReconnectNode
+	mu    sync.Mutex
+	self  []byte
+	dht   *TDHT
+	conns map[string]bool
 }
 
 // Startup is called only once when the plugin is loaded
@@ -32,33 +27,11 @@ func (d *DiscoveryPlugin) Startup(net *libp2p.Network) {
 	node.Address = net.GetAddress()
 	d.self = node.PublicKey
 	d.dht = CreateDHT(node)
-	d.rcList = make([]*tReconnectNode, 0)
-}
-
-func (d *DiscoveryPlugin) doReConn(n *libp2p.Network) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if len(d.rcList) == 0 {
-		return
-	}
-	now := time.Now().Unix()
-	addrs := make([]string, 0)
-	for _, node := range d.rcList {
-		if node.timeout > now {
-			break
-		}
-		addrs = append(addrs, node.address)
-	}
-	if len(addrs) == 0 {
-		return
-	}
-	d.rcList = d.rcList[len(addrs):]
-	go n.Bootstrap(addrs...)
+	d.conns = make(map[string]bool)
 }
 
 // Receive is called every time when messages are received
 func (d *DiscoveryPlugin) Receive(ctx *libp2p.PluginContext) error {
-	d.doReConn(ctx.Session.Net)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	switch msg := ctx.GetMessage().(type) {
@@ -92,20 +65,46 @@ func (d *DiscoveryPlugin) Receive(ctx *libp2p.PluginContext) error {
 		ctx.Reply(resp)
 	case *message.DhtNodes:
 		for _, addr := range msg.Addresses {
-			rst := d.addNode(addr)
-			if !rst {
+			pu, err := url.Parse(addr)
+			if err != nil {
 				continue
 			}
+
+			if d.conns[pu.User.Username()] {
+				continue
+			}
+
 			session := ctx.Session.Net.NewSession(addr)
 			if session == nil {
 				continue
 			}
 			session.Send(new(message.DhtPing))
-			trav := new(message.NatTraversal)
-			trav.FromAddr = ctx.Session.Net.GetAddress()
-			trav.ToAddr = addr
-			ctx.Reply(trav)
 		}
+		go func() {
+			time.Sleep(1 * time.Second)
+			for _, addr := range msg.Addresses {
+				pu, err := url.Parse(addr)
+				if err != nil {
+					continue
+				}
+				id, err := hex.DecodeString(pu.User.Username())
+				if bytes.Compare(id, ctx.Session.Net.GetID()) == 0 {
+					continue
+				}
+
+				d.mu.Lock()
+				if d.conns[pu.User.Username()] {
+					d.mu.Unlock()
+					continue
+				}
+				d.mu.Unlock()
+
+				trav := new(message.NatTraversal)
+				trav.FromAddr = ctx.Session.Net.GetAddress()
+				trav.ToAddr = addr
+				ctx.Reply(trav)
+			}
+		}()
 	case *message.NatTraversal:
 		log.Printf("Traversal peer:<%x>, from:%s, to:%s \n", ctx.GetRemoteID(), msg.FromAddr, msg.ToAddr)
 		fu, err := url.Parse(msg.FromAddr)
@@ -145,7 +144,13 @@ func (d *DiscoveryPlugin) Receive(ctx *libp2p.PluginContext) error {
 			if session == nil {
 				return nil
 			}
-			msg.FromAddr = ctx.Session.GetRemoteAddress()
+			peer := ctx.Session.GetRemoteAddress()
+			pu, err := url.Parse(peer)
+			if err == nil {
+				if pu.Hostname() != tu.Hostname() {
+					msg.FromAddr = peer
+				}
+			}
 			session.Send(msg)
 		}
 	}
@@ -177,6 +182,18 @@ func (d *DiscoveryPlugin) addNode(address string) (bNew bool) {
 	return
 }
 
+// PeerConnect is called every time a PeerSession is initialized and connected
+func (d *DiscoveryPlugin) PeerConnect(s *libp2p.PeerSession) {
+	pu, err := url.Parse(s.GetRemoteAddress())
+	if err != nil {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.conns[pu.User.Username()] = true
+	log.Println("new peer:", pu.User.Username(), len(d.conns))
+}
+
 // PeerDisconnect is called every time a PeerSession connection is closed
 func (d *DiscoveryPlugin) PeerDisconnect(s *libp2p.PeerSession) {
 	node := NodeID{}
@@ -185,14 +202,10 @@ func (d *DiscoveryPlugin) PeerDisconnect(s *libp2p.PeerSession) {
 		return
 	}
 	node.Address = s.GetRemoteAddress()
-	rcNode := tReconnectNode{}
-	rcNode.address = node.Address
-	rcNode.timeout = time.Now().Add(time.Minute * 5).Unix()
+	pu, _ := url.Parse(node.Address)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.dht.RemoveNode(&node)
-	if len(d.rcList) > 1000 {
-		return
-	}
-	d.rcList = append(d.rcList, &rcNode)
+	delete(d.conns, pu.User.Username())
+	log.Println("peer leave:", pu.User.Username(), len(d.conns))
 }
