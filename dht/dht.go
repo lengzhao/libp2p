@@ -96,7 +96,7 @@ func (t *TDHT) Self() INodeID {
 
 // Add add the node to dht,return true if new node
 func (t *TDHT) Add(target INodeID) bool {
-	if len(t.self.GetPublicKey()) != len(target.GetPublicKey()) {
+	if equalID(t.self, target) {
 		return false
 	}
 
@@ -160,6 +160,10 @@ func (t *TDHT) RemoveNode(target INodeID) bool {
 func (t *TDHT) NodeExists(target INodeID) bool {
 	bucketID := logicDist(target, t.self)
 	bucket := t.getBucket(bucketID)
+
+	if equalID(t.self, target) {
+		return true
+	}
 
 	bucket.mu.Lock()
 	defer bucket.mu.Unlock()

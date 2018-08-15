@@ -104,6 +104,9 @@ func (c *PeerSession) eventConnect(peerID []byte) {
 	}
 }
 func (c *PeerSession) eventDisConnect() {
+	if !c.connEvent {
+		return
+	}
 	for _, plugin := range c.Net.pulgins {
 		defer plugin.PeerDisconnect(c)
 	}
@@ -111,7 +114,6 @@ func (c *PeerSession) eventDisConnect() {
 
 func (c *PeerSession) receiveMsg() {
 	defer c.Close(false)
-	c.eventConnect(nil)
 	defer c.eventDisConnect()
 	for {
 		ns, err := c.session.AcceptStream()
