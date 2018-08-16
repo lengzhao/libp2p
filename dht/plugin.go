@@ -34,11 +34,14 @@ func (d *DiscoveryPlugin) Startup(net *libp2p.Network) {
 
 // Receive is called every time when messages are received
 func (d *DiscoveryPlugin) Receive(ctx *libp2p.PluginContext) error {
-	if time.Now().Unix() > d.lastDiscovery+7200 {
-		ctx.Session.Net.Broadcast(new(message.DhtFind))
-	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if time.Now().Unix() > d.lastDiscovery+7200 {
+		d.lastDiscovery = time.Now().Unix()
+		d.mu.Unlock()
+		ctx.Session.Net.Broadcast(new(message.DhtFind))
+		d.mu.Lock()
+	}
 	switch msg := ctx.GetMessage().(type) {
 	case *message.DhtPing:
 		log.Printf("Ping from <%s>\n", ctx.Session.GetRemoteAddress())
@@ -133,7 +136,7 @@ func (d *DiscoveryPlugin) Receive(ctx *libp2p.PluginContext) error {
 		}
 		// dst
 		if bytes.Compare(tid, d.self) == 0 {
-			if bytes.Compare(fid, d.self) == 0 {
+			if d.conns[fu.User.Username()] {
 				return nil
 			}
 			session := ctx.Session.Net.NewSession(msg.FromAddr)
@@ -143,7 +146,10 @@ func (d *DiscoveryPlugin) Receive(ctx *libp2p.PluginContext) error {
 			session.Send(new(message.DhtPing))
 			log.Println("Traversal dst, send DhtPing to:", msg.FromAddr)
 		} else if bytes.Compare(fid, ctx.GetRemoteID()) == 0 { //proxy
-			if bytes.Compare(tid, d.self) == 0 {
+			if !d.conns[tu.User.Username()] {
+				return nil
+			}
+			if !d.conns[fu.User.Username()] {
 				return nil
 			}
 			session := ctx.Session.Net.NewSession(msg.ToAddr)
