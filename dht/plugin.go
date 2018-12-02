@@ -19,6 +19,7 @@ type DiscoveryPlugin struct {
 	dht           *TDHT
 	conns         map[string]bool
 	lastDiscovery int64
+	Filter        bool
 }
 
 // Startup is called only once when the plugin is loaded
@@ -164,6 +165,27 @@ func (d *DiscoveryPlugin) Receive(ctx *libp2p.PluginContext) error {
 				}
 			}
 			session.Send(msg)
+		}
+	default:
+		if !d.Filter {
+			return nil
+		}
+		address := ctx.Session.GetRemoteAddress()
+		u, err := url.Parse(address)
+		if err != nil {
+			panic(err)
+		}
+		id, err := hex.DecodeString(u.User.Username())
+		if err != nil {
+			panic(err)
+		}
+		node := new(NodeID)
+		node.PublicKey = id
+		node.Address = address
+		exist := d.dht.NodeExists(node)
+		if !exist {
+			ctx.Session.Close(true)
+			panic("not in dht")
 		}
 	}
 	return nil
