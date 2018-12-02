@@ -184,6 +184,7 @@ func (d *DiscoveryPlugin) Receive(ctx *libp2p.PluginContext) error {
 		node.Address = address
 		exist := d.dht.NodeExists(node)
 		if !exist {
+			ctx.Session.Close(true)
 			panic("not in dht")
 		}
 	}
