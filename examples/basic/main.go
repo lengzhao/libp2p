@@ -2,9 +2,8 @@ package main
 
 import (
 	"flag"
-	"fmt"
-	"github.com/lengzhao/libp2p"
 	"github.com/lengzhao/libp2p/dht"
+	"github.com/lengzhao/libp2p/network"
 	"log"
 	"os"
 	"time"
@@ -12,22 +11,22 @@ import (
 
 func main() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
-	address := flag.String("addr", "kcp://127.0.0.1:3000", "listen address")
+	address := flag.String("addr", "tcp://127.0.0.1:3000", "listen address")
 	peer := flag.String("peer", "", "peer address")
 
 	flag.Parse()
-	n := libp2p.NewNetwork(*address)
+	n := network.New()
 	if n == nil {
-		fmt.Println("error address")
+		log.Println("error address")
 		os.Exit(2)
 	}
 
-	n.AddPlugin(new(dht.DiscoveryPlugin))
+	n.RegistPlugin(new(dht.DiscoveryPlugin))
 	if *peer != "" {
 		go func() {
 			time.Sleep(1 * time.Second)
-			n.Bootstrap(*peer)
+			//n.Bootstrap(*peer)
 		}()
 	}
-	n.Listen()
+	n.Listen(*address)
 }

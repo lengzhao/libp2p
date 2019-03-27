@@ -2,14 +2,14 @@ package main
 
 import (
 	"bufio"
+	"encoding/gob"
 	"flag"
-	"fmt"
 	"github.com/lengzhao/libp2p"
-	"github.com/lengzhao/libp2p/dht"
-	"github.com/lengzhao/libp2p/examples/chat/msg"
+	"github.com/lengzhao/libp2p/network"
+	"github.com/lengzhao/libp2p/plugins"
 	"log"
 	"os"
-	"time"
+	"strings"
 )
 
 // ChatPlugin chat plugin
@@ -17,11 +17,32 @@ type ChatPlugin struct {
 	*libp2p.Plugin
 }
 
+// Message chat message
+type Message struct {
+	Data string
+}
+
+type interMsg struct {
+	typ string
+	msg interface{}
+}
+
+func (m *interMsg) GetType() string {
+	return m.typ
+}
+func (m *interMsg) GetMsg() interface{} {
+	return m.msg
+}
+
+func init() {
+	gob.Register(Message{})
+}
+
 // Receive Receive message
-func (state *ChatPlugin) Receive(ctx *libp2p.PluginContext) error {
-	switch info := ctx.GetMessage().(type) {
-	case *msg.Message:
-		fmt.Printf("Info <%s> %d %s \n", ctx.Session.GetRemoteAddress(), len(info.Data), info.Data)
+func (state *ChatPlugin) Receive(e libp2p.Event) error {
+	switch info := e.GetMessage().(type) {
+	case Message:
+		log.Printf("Info <%s> %d %s \n", e.GetSession().GetPeerAddr(), len(info.Data), info.Data)
 	}
 
 	return nil
@@ -32,38 +53,35 @@ func (state *ChatPlugin) Receive(ctx *libp2p.PluginContext) error {
 //the peer address is the listen address of first node
 func main() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
-	address := flag.String("addr", "kcp://127.0.0.1:3000", "listen address")
-	peer := flag.String("peer", "", "peer address")
+	address := flag.String("addr", "tcp://127.0.0.1:3003", "listen address")
+	peer := flag.String("peer", "tcp://47ed0566bff0@127.0.0.1:3000", "peer address")
 
 	flag.Parse()
-	n := libp2p.NewNetwork(*address)
+	n := network.New()
 	if n == nil {
-		fmt.Println("error address")
+		log.Println("error address")
 		os.Exit(2)
 	}
 
-	n.AddPlugin(new(dht.DiscoveryPlugin))
-	n.AddPlugin(new(ChatPlugin))
-	if *peer != "" {
-		go func() {
-			time.Sleep(1 * time.Second)
-			n.Bootstrap(*peer)
-		}()
-	}
+	n.RegistPlugin(new(plugins.DiscoveryPlugin))
+	n.RegistPlugin(plugins.NewBootstrap([]string{*peer}))
+	n.RegistPlugin(plugins.NewBroadcast(0))
+	n.RegistPlugin(new(ChatPlugin))
 	go func() {
-		//fmt.Printf("Please enter your message: ")
+		//log.Printf("Please enter your message: ")
 		var info string
 		inputReader := bufio.NewReader(os.Stdin)
 		for {
 			//fmt.Scan(&info)
 			info, _ = inputReader.ReadString('\n')
+			info = strings.TrimSpace(info)
 			if len(info) == 0 {
 				continue
 			}
-			fmt.Println("my send:", len(info), info)
-			n.Broadcast(&msg.Message{Data: info})
+			log.Println("my send:", len(info), info)
+			msg := interMsg{"broadcase", Message{Data: info}}
+			n.SendInternalMsg(&msg)
 		}
-
 	}()
-	n.Listen()
+	n.Listen(*address)
 }

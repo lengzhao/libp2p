@@ -1,0 +1,253 @@
+package conn
+
+import (
+	"bytes"
+	"errors"
+	"github.com/lengzhao/libp2p"
+	"log"
+	"net"
+	"net/url"
+	"sync"
+	"time"
+)
+
+// UDPPool connection over udp,it could lose message.
+type UDPPool struct {
+	mu      sync.Mutex
+	active  bool
+	scheme  string
+	address libp2p.Addr
+	server  net.PacketConn
+	conns   map[string]*udpConn
+}
+
+// Listen listen
+func (c *UDPPool) Listen(addr string, handle func(libp2p.Conn)) error {
+	if c.active {
+		return errors.New("error status,it is actived")
+	}
+	u, err := url.Parse(addr)
+	if err != nil {
+		return err
+	}
+
+	c.server, err = net.ListenPacket(u.Scheme, u.Host)
+	if err != nil {
+		return err
+	}
+
+	c.scheme = u.Scheme
+	c.address = newAddr(u, true)
+	c.active = true
+	c.conns = make(map[string]*udpConn)
+	for {
+		data := make([]byte, 1500)
+		n, peer, err := c.server.ReadFrom(data)
+		if err != nil {
+			return nil
+		}
+		address := peer.String()
+		if n == len(closeData) && bytes.Compare(data[:5], closeData) == 0 {
+			c.mu.Lock()
+			conn, ok := c.conns[address]
+			if ok {
+				delete(c.conns, address)
+			}
+			c.mu.Unlock()
+			if ok {
+				conn.Close()
+			}
+			continue
+		}
+		c.mu.Lock()
+		conn, ok := c.conns[address]
+		if !ok {
+			conn = newUDPConn(c, peer)
+			c.conns[address] = conn
+			go handle(conn)
+		}
+		c.mu.Unlock()
+		log.Println("receive:", address, string(data[:n]))
+		conn.cache(data[:n])
+	}
+}
+
+type udpClient struct {
+	net.Conn
+	peerAddr *dfAddr
+	selfAddr *dfAddr
+}
+
+func (c *udpClient) RemoteAddr() libp2p.Addr {
+	return c.peerAddr
+}
+
+func (c *udpClient) LocalAddr() libp2p.Addr {
+	return c.selfAddr
+}
+
+func (c *udpClient) Close() error {
+	c.Conn.Write(closeData)
+	return c.Conn.Close()
+}
+
+func (c *udpClient) Read(data []byte) (int, error) {
+	c.Conn.SetReadDeadline(time.Now().Add(time.Minute * 10))
+	n, err := c.Conn.Read(data)
+	if err != nil {
+		return 0, err
+	}
+	if n == len(closeData) && bytes.Compare(data[:n], closeData) == 0 {
+		defer c.Conn.Close()
+		return 0, errors.New("closed")
+	}
+	return n, err
+}
+
+// Dial dial
+func (c *UDPPool) Dial(addr string) (libp2p.Conn, error) {
+	u, err := url.Parse(addr)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := net.Dial(u.Scheme, u.Host)
+	if err != nil {
+		return nil, err
+	}
+	out := new(udpClient)
+	out.Conn = conn
+	out.peerAddr = newAddr(u, true)
+	u2, _ := url.Parse(addr)
+	u2.Host = conn.LocalAddr().String()
+	u2.User = nil
+	out.selfAddr = newAddr(u2, false)
+	return out, nil
+}
+
+// Close closes the listener.
+// Any blocked Accept operations will be unblocked and return errors.
+func (c *UDPPool) Close() {
+	c.server.Close()
+	for k, conn := range c.conns {
+		delete(c.conns, k)
+		conn.Close()
+	}
+	return
+}
+
+func (c *UDPPool) removeConn(addr string) {
+	c.mu.Lock()
+	delete(c.conns, addr)
+	c.mu.Unlock()
+}
+
+// Addr returns the listener's network address.
+func (c *UDPPool) Addr() net.Addr {
+	return c.server.LocalAddr()
+}
+
+type udpConn struct {
+	mu       sync.Mutex
+	active   bool
+	conn     *UDPPool
+	buff     []byte
+	cached   chan []byte
+	peer     net.Addr
+	selfAddr libp2p.Addr
+	peerAddr libp2p.Addr
+	timeout  time.Duration
+	to       *time.Timer
+	die      chan bool
+}
+
+func newUDPConn(p *UDPPool, addr net.Addr) *udpConn {
+	out := new(udpConn)
+	out.cached = make(chan []byte, 100)
+	out.conn = p
+	out.peer = addr
+	out.active = true
+	out.timeout = 10 * time.Minute
+	out.to = time.NewTimer(out.timeout)
+	out.die = make(chan bool)
+	out.selfAddr = p.address
+	pa := new(url.URL)
+	pa.Scheme = p.address.Scheme()
+	pa.Host = addr.String()
+	out.peerAddr = newAddr(pa, false)
+	return out
+}
+
+func (c *udpConn) cache(data []byte) {
+	select {
+	case <-c.die:
+	default:
+		c.cached <- data
+	}
+}
+
+// Read reads data from the connection.
+// Read can be made to time out and return an Error with Timeout() == true
+// after a fixed time limit; see SetDeadline and SetReadDeadline.
+func (c *udpConn) Read(b []byte) (n int, err error) {
+	//log.Println("start to read:", len(b), c.LocalAddr().String())
+	if c.buff == nil {
+		c.to.Reset(c.timeout)
+		defer c.to.Stop()
+		select {
+		case c.buff = <-c.cached:
+			log.Println("read data:", c.LocalAddr().String())
+		case <-c.to.C:
+			log.Println("read timeout:", c.LocalAddr().String())
+			return 0, errors.New("read timeout")
+		}
+	}
+	if c.buff == nil {
+		return 0, errors.New("the connect is closed. c.buff == nil")
+	}
+	copy(b, c.buff)
+	n = len(b)
+	if n >= len(c.buff) {
+		n = len(c.buff)
+		c.buff = nil
+	} else {
+		c.buff = c.buff[n:]
+	}
+
+	return
+}
+
+// Write writes data to the connection.
+// Write can be made to time out and return an Error with Timeout() == true
+// after a fixed time limit; see SetDeadline and SetWriteDeadline.
+func (c *udpConn) Write(b []byte) (n int, err error) {
+	return c.conn.server.WriteTo(b, c.peer)
+}
+
+// Close closes the connection.
+// Any blocked Read or Write operations will be unblocked and return errors.
+func (c *udpConn) Close() error {
+	c.active = false
+	select {
+	case <-c.die:
+		return nil
+	default:
+		close(c.die)
+		c.Write(closeData)
+		log.Println("close udpConn:", c.peer.String())
+		close(c.cached)
+		c.to.Stop()
+		c.conn.removeConn(c.peer.String())
+	}
+
+	return nil
+}
+
+// LocalAddr returns the local network address.
+func (c *udpConn) LocalAddr() libp2p.Addr {
+	return c.selfAddr
+}
+
+// RemoteAddr returns the remote network address.
+func (c *udpConn) RemoteAddr() libp2p.Addr {
+	return c.peerAddr
+}
