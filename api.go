@@ -21,6 +21,7 @@ type Addr interface {
 	User() string
 	Host() string
 	IsServer() bool
+	UpdateUser(string)
 }
 
 // Conn is a generic stream-oriented network connection.

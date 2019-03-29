@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/gob"
+	"encoding/hex"
 	"errors"
 	"github.com/lengzhao/libp2p"
 	"log"
@@ -36,10 +37,14 @@ func newSession(m *Manager, conn libp2p.Conn, peer []byte, sync bool) *Session {
 	out.selfID = m.cryp.GetPublic()
 	out.peerID = peer
 
-	for _, p := range m.plugins {
-		p.PeerConnect(out)
+	if len(peer) > 0 {
+		for _, p := range m.plugins {
+			p.PeerConnect(out)
+		}
 	}
-	log.Println("new session,peer:", conn.RemoteAddr().String(), ". server?", conn.RemoteAddr().IsServer())
+
+	log.Printf("new session,self:%s.peer:%s,server(%t)\n",
+		conn.LocalAddr().String(), conn.RemoteAddr().String(), conn.RemoteAddr().IsServer())
 	if sync {
 		out.receive()
 	} else {
@@ -58,6 +63,9 @@ func (s *Session) receive() {
 	defer func() {
 		log.Println("session close:", s.conn.RemoteAddr().String())
 		s.conn.Close()
+		if len(s.peerID) == 0 {
+			return
+		}
 		for _, p := range s.mgr.plugins {
 			p.PeerDisconnect(s)
 		}
@@ -180,6 +188,10 @@ func (s *Session) process(data, sign []byte) error {
 	}
 	if len(s.peerID) == 0 {
 		s.peerID = e.From
+		s.GetPeerAddr().UpdateUser(hex.EncodeToString(e.From))
+		for _, p := range s.mgr.plugins {
+			p.PeerConnect(s)
+		}
 	}
 	if bytes.Compare(s.peerID, e.From) != 0 {
 		s.Close()

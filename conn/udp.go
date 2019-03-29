@@ -179,9 +179,8 @@ func newUDPConn(p *UDPPool, addr net.Addr) *udpConn {
 
 func (c *udpConn) cache(data []byte) {
 	select {
-	case <-c.die:
+	case c.cached <- data:
 	default:
-		c.cached <- data
 	}
 }
 
@@ -234,7 +233,6 @@ func (c *udpConn) Close() error {
 		close(c.die)
 		c.Write(closeData)
 		log.Println("close udpConn:", c.peer.String())
-		close(c.cached)
 		c.to.Stop()
 		c.conn.removeConn(c.peer.String())
 	}

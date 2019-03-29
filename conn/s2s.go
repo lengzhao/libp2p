@@ -66,7 +66,10 @@ func (c *S2SPool) Listen(addr string, handle func(libp2p.Conn)) error {
 		c.mu.Lock()
 		conn, ok := c.conns[pAddr]
 		if !ok {
-			conn = newS2SConn(c, c.address, peer)
+			p, _ := url.Parse(addr)
+			p.Host = peer.String()
+			p.User = nil
+			conn = newS2SConn(c, newAddr(p, false), peer)
 			c.conns[pAddr] = conn
 			go handle(conn)
 		}
@@ -80,6 +83,9 @@ func (c *S2SPool) Dial(addr string) (libp2p.Conn, error) {
 	u, err := url.Parse(addr)
 	if err != nil {
 		return nil, err
+	}
+	if u.User == nil || u.User.Username() == "" {
+		return nil, errors.New("unknow user id")
 	}
 	if !c.active {
 		log.Println("s2s server is not active,dial udp:", addr)
@@ -108,7 +114,7 @@ func (c *S2SPool) Dial(addr string) (libp2p.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := newS2SConn(c, c.address, nConn.RemoteAddr())
+	out := newS2SConn(c, newAddr(u, true), nConn.RemoteAddr())
 	c.conns[u.Host] = out
 	return out, nil
 }
@@ -117,9 +123,11 @@ func (c *S2SPool) Dial(addr string) (libp2p.Conn, error) {
 // Any blocked Accept operations will be unblocked and return errors.
 func (c *S2SPool) Close() {
 	c.server.Close()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	for k, conn := range c.conns {
 		delete(c.conns, k)
-		conn.Close()
+		go conn.Close()
 	}
 	return
 }
@@ -151,16 +159,13 @@ type s2sConn struct {
 	die      chan bool
 }
 
-func newS2SConn(p *S2SPool, addr *dfAddr, peer net.Addr) *s2sConn {
-	pa := new(url.URL)
-	pa.Scheme = addr.Scheme()
-	pa.Host = peer.String()
+func newS2SConn(p *S2SPool, paddr *dfAddr, udpAddr net.Addr) *s2sConn {
 	out := new(s2sConn)
 	out.cached = make(chan []byte, 100)
 	out.conn = p
-	out.selfAddr = addr
-	out.peerAddr = newAddr(pa, false)
-	out.peer = peer
+	out.selfAddr = p.address
+	out.peerAddr = paddr
+	out.peer = udpAddr
 	out.active = true
 	out.timeout = 10 * time.Minute
 	out.rto = time.NewTimer(out.timeout)
@@ -183,6 +188,7 @@ func (c *s2sConn) keepalive() {
 		defer c.wto.Stop()
 		select {
 		case <-c.die:
+			return
 		case <-c.wto.C:
 			d := make([]byte, 6)
 			c.Write(d)
@@ -236,9 +242,8 @@ func (c *s2sConn) Close() error {
 	select {
 	case <-c.die:
 	default:
-		c.Write(closeData)
 		close(c.die)
-		close(c.cached)
+		c.Write(closeData)
 		c.rto.Stop()
 		c.wto.Stop()
 		go c.conn.removeConn(c.peer.String())

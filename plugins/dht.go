@@ -47,6 +47,7 @@ type DiscoveryPlugin struct {
 	Filter  bool
 	address string
 	net     libp2p.Network
+	scheme  string
 }
 
 func init() {
@@ -74,6 +75,7 @@ func (d *DiscoveryPlugin) Startup(net libp2p.Network) {
 	d.conns = make(map[string]bool)
 	d.address = node.Address
 	d.net = net
+	d.scheme = u.Scheme
 }
 
 // Receive is called every time when messages are received
@@ -160,8 +162,14 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 				log.Println("fail to send ping:", addr, err)
 				continue
 			}
+			if pu.Scheme == "s2s" && pu.Scheme == d.scheme {
+				trav := new(NatTraversal)
+				trav.FromAddr = d.address
+				trav.ToAddr = addr
+				e.Reply(trav)
+			}
 		}
-	case *NatTraversal:
+	case NatTraversal:
 		log.Printf("Traversal peer:<%x>, from:%s, to:%s \n", e.GetPeerID(), msg.FromAddr, msg.ToAddr)
 		fu, err := url.Parse(msg.FromAddr)
 		if err != nil {
@@ -265,9 +273,6 @@ func (d *DiscoveryPlugin) addNode(address string) (bNew bool) {
 // PeerConnect is called every time a PeerSession is initialized and connected
 func (d *DiscoveryPlugin) PeerConnect(s libp2p.Session) {
 	un := s.GetPeerAddr().User()
-	if un == "" {
-		return
-	}
 	go s.Send(Ping{d.address})
 	log.Println("new peer:", un, len(d.conns))
 	d.mu.Lock()

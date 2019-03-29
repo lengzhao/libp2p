@@ -27,8 +27,8 @@ type Manager struct {
 func New() *Manager {
 	out := new(Manager)
 	out.plugins = make([]libp2p.IPlugin, 0)
-	out.connPool = conn.DefaultMgr
-	out.cryp = crypto.DefaultMgr
+	out.connPool = conn.GetDefaultMgr()
+	out.cryp = crypto.GetDefaultMgr()
 	return out
 }
 
@@ -37,8 +37,8 @@ func (m *Manager) SetConnPoolMgr(p libp2p.ConnPoolMgr) {
 	m.connPool = p
 }
 
-// SetKey set key of sign
-func (m *Manager) SetKey(key libp2p.CryptoMgr) {
+// SetKeyMgr set key manager of sign
+func (m *Manager) SetKeyMgr(key libp2p.CryptoMgr) {
 	m.cryp = key
 }
 
@@ -79,7 +79,7 @@ func (m *Manager) NewSession(address string) (libp2p.Session, error) {
 
 	u, err := url.Parse(address)
 	if err != nil {
-		log.Println("fail to parse address.addr:", address, err)
+		//log.Println("fail to parse address.addr:", address, err)
 		return nil, err
 	}
 	if u.User == nil {

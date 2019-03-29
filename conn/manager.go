@@ -17,22 +17,20 @@ type PoolMgr struct {
 	listener libp2p.ConnPool
 }
 
-// DefaultMgr include tcp connection pool
-var DefaultMgr *PoolMgr
-
-func init() {
-	DefaultMgr = new(PoolMgr)
-	DefaultMgr.pool = make(map[string]libp2p.ConnPool)
-	DefaultMgr.RegConnPool("tcp", new(TCPPool))
-	DefaultMgr.RegConnPool("udp", new(UDPPool))
-	DefaultMgr.RegConnPool("ws", new(WSPool))
-	DefaultMgr.RegConnPool("s2s", new(S2SPool))
-}
-
 // NewMgr new manager of connection pool
 func NewMgr() *PoolMgr {
 	out := new(PoolMgr)
 	out.pool = make(map[string]libp2p.ConnPool)
+	return out
+}
+
+// GetDefaultMgr create default manager,support tcp,udp,ws,s2s
+func GetDefaultMgr() *PoolMgr {
+	out := NewMgr()
+	out.RegConnPool("tcp", new(TCPPool))
+	out.RegConnPool("udp", new(UDPPool))
+	out.RegConnPool("ws", new(WSPool))
+	out.RegConnPool("s2s", new(S2SPool))
 	return out
 }
 
@@ -127,4 +125,9 @@ func (a *dfAddr) Host() string {
 }
 func (a *dfAddr) IsServer() bool {
 	return a.isServer
+}
+func (a *dfAddr) UpdateUser(user string) {
+	if a.addr.User == nil || a.addr.User.Username() == "" {
+		a.addr.User = url.User(user)
+	}
 }
