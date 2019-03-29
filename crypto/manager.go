@@ -13,17 +13,22 @@ type Manager struct {
 	signType string
 }
 
-// DefaultMgr default manager
-var DefaultMgr *Manager
+// NewMgr new manager
+func NewMgr() *Manager {
+	out := new(Manager)
+	out.pool = make(map[string]libp2p.SignKey)
+	out.privKey = make([]byte, 32)
+	rand.Read(out.privKey)
+	return out
+}
 
-func init() {
-	DefaultMgr = new(Manager)
-	DefaultMgr.pool = make(map[string]libp2p.SignKey)
-	DefaultMgr.privKey = make([]byte, 32)
-	rand.Read(DefaultMgr.privKey)
+// GetDefaultMgr create default manager,use NilKey
+func GetDefaultMgr() *Manager {
+	out := NewMgr()
 	k := new(NilKey)
-	DefaultMgr.Register(k)
-	DefaultMgr.signType = k.GetType()
+	out.Register(k)
+	out.SetPrivKey(k.GetType(), nil)
+	return out
 }
 
 // SetPrivKey get
@@ -33,7 +38,9 @@ func (m *Manager) SetPrivKey(typ string, key []byte) error {
 		return errors.New("not exist")
 	}
 	m.signType = typ
-	m.privKey = key
+	if len(key) > 0 {
+		m.privKey = key
+	}
 	return nil
 }
 

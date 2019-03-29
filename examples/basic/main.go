@@ -2,11 +2,10 @@ package main
 
 import (
 	"flag"
-	"github.com/lengzhao/libp2p/dht"
 	"github.com/lengzhao/libp2p/network"
+	"github.com/lengzhao/libp2p/plugins"
 	"log"
 	"os"
-	"time"
 )
 
 func main() {
@@ -21,12 +20,8 @@ func main() {
 		os.Exit(2)
 	}
 
-	n.RegistPlugin(new(dht.DiscoveryPlugin))
-	if *peer != "" {
-		go func() {
-			time.Sleep(1 * time.Second)
-			//n.Bootstrap(*peer)
-		}()
-	}
+	n.RegistPlugin(new(plugins.DiscoveryPlugin))
+	n.RegistPlugin(plugins.NewBroadcast(0))
+	n.RegistPlugin(plugins.NewBootstrap([]string{*peer}))
 	n.Listen(*address)
 }
