@@ -9,6 +9,7 @@ import (
 	"github.com/lengzhao/libp2p/crypto"
 	"log"
 	"net/url"
+	"runtime/debug"
 	"sync"
 )
 
@@ -117,11 +118,20 @@ func (m *Manager) RegistPlugin(p libp2p.IPlugin) {
 
 // SendInternalMsg send internal message
 func (m *Manager) SendInternalMsg(msg libp2p.InterMsg) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for _, p := range m.plugins {
-		p.RecInternalMsg(msg)
-	}
+	go func() {
+		defer func() {
+			err := recover()
+			if err != nil {
+				log.Printf("[error]internalMsg process:%t,%v,%s", msg, msg, err)
+				log.Println(string(debug.Stack()))
+			}
+		}()
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		for _, p := range m.plugins {
+			p.RecInternalMsg(msg)
+		}
+	}()
 }
 
 // Close close manager

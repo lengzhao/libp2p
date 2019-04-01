@@ -190,3 +190,18 @@ func TestNew5(t *testing.T) {
 	}
 	// t.Error("error:")
 }
+
+func TestNew6(t *testing.T) {
+	log.Println("start test:", t.Name())
+	addr1 := "s2s://127.0.0.1:8081"
+	addr2 := "s2s://127.0.0.1:8082"
+	addr3 := "udp://127.0.0.1:8083"
+	addr4 := "s2s://127.0.0.1:8084"
+	addr5 := "s2s://127.0.0.1:8085"
+	err := runTest2(addr1, addr2, addr3, addr4, addr5)
+	// err := runTest2(addr1, addr2, addr3)
+	if err != nil {
+		t.Error("error:", err)
+	}
+	// t.Error("error:")
+}
