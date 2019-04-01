@@ -162,7 +162,9 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 				log.Println("fail to send ping:", addr, err)
 				continue
 			}
-			if pu.Scheme == "s2s" && pu.Scheme == d.scheme {
+			if pu.Scheme == d.scheme &&
+				e.GetSession().GetPeerAddr().IsServer() &&
+				e.GetSession().GetSelfAddr().IsServer() {
 				trav := new(NatTraversal)
 				trav.FromAddr = d.address
 				trav.ToAddr = addr

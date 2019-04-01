@@ -99,6 +99,7 @@ func (c *S2SPool) Dial(addr string) (libp2p.Conn, error) {
 		u2, _ := url.Parse(addr)
 		u2.Host = conn.LocalAddr().String()
 		u2.User = nil
+		u2.Scheme = "udp"
 		out.selfAddr = newAddr(u2, false)
 		return out, nil
 	}

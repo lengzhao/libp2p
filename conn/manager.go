@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/url"
+	"runtime/debug"
 	"sync"
 )
 
@@ -57,12 +58,17 @@ func (mgr *PoolMgr) Listen(addr string, handle func(libp2p.Conn)) error {
 	return pool.Listen(addr, mgr.process)
 }
 
-// Dial dial,the address must be with scheme,such as:"tcp://127.0.0.1:1111"
+// Dial dial,the address must be with scheme,such as:"tcp://user_id@127.0.0.1:1111"
 func (mgr *PoolMgr) Dial(addr string) (libp2p.Conn, error) {
 	u, err := url.Parse(addr)
 	if err != nil {
 		return nil, err
 	}
+
+	if u.User == nil || u.User.Username() == "" {
+		return nil, errors.New("user=nil")
+	}
+
 	pool, ok := mgr.pool[u.Scheme]
 	if !ok {
 		return nil, errors.New("unsupport scheme")
@@ -72,7 +78,11 @@ func (mgr *PoolMgr) Dial(addr string) (libp2p.Conn, error) {
 
 func (mgr *PoolMgr) process(conn libp2p.Conn) {
 	defer func() {
-		recover()
+		err := recover()
+		if err != nil {
+			log.Printf("[error]connection process:%t,%v,%s", conn, conn, err)
+			log.Println(string(debug.Stack()))
+		}
 	}()
 	mgr.handle(conn)
 }
