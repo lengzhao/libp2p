@@ -79,7 +79,7 @@ func main() {
 				continue
 			}
 			log.Println("my send:", len(info), info)
-			msg := interMsg{"broadcase", Message{Data: info}}
+			msg := interMsg{"broadcast", Message{Data: info}}
 			n.SendInternalMsg(&msg)
 		}
 	}()

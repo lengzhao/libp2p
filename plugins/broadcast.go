@@ -67,7 +67,7 @@ func (b *Broadcast) PeerDisconnect(s libp2p.Session) {
 // RecInternalMsg internal msg
 func (b *Broadcast) RecInternalMsg(msg libp2p.InterMsg) error {
 	switch msg.GetType() {
-	case "broadcase":
+	case "broadcast":
 		b.Broadcast(msg.GetMsg())
 	case "randsend":
 		b.RandSend(msg.GetMsg())

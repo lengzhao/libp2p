@@ -43,8 +43,8 @@ func newSession(m *Manager, conn libp2p.Conn, peer []byte, sync bool) *Session {
 		}
 	}
 
-	log.Printf("new session,self:%s.peer:%s,server(%t)\n",
-		conn.LocalAddr().String(), conn.RemoteAddr().String(), conn.RemoteAddr().IsServer())
+	// log.Printf("new session,self:%s.peer:%s,server(%t)\n",
+	// 	conn.LocalAddr().String(), conn.RemoteAddr().String(), conn.RemoteAddr().IsServer())
 	if sync {
 		out.receive()
 	} else {
@@ -61,7 +61,7 @@ type dataHeader struct {
 
 func (s *Session) receive() {
 	defer func() {
-		log.Println("session close:", s.conn.RemoteAddr().String())
+		// log.Println("session close:", s.conn.RemoteAddr().String())
 		s.conn.Close()
 		if len(s.peerID) == 0 {
 			return
@@ -82,7 +82,7 @@ func (s *Session) receive() {
 		buf := bytes.NewReader(headBuf)
 		binary.Read(buf, binary.BigEndian, &head)
 		if head.Magic != magic {
-			log.Println("error magic of message:", head.Magic)
+			// log.Println("error magic of message:", head.Magic)
 			continue
 		}
 		if head.Len == 0 {
@@ -95,7 +95,7 @@ func (s *Session) receive() {
 		for offset < head.Len {
 			n, err := s.conn.Read(data[offset:])
 			if err != nil {
-				log.Println("fail to read message:", err)
+				// log.Println("fail to read message:", err)
 				return
 			}
 			offset += uint16(n)
@@ -110,9 +110,9 @@ func (s *Session) receive() {
 		sign := data[1 : signLen+1]
 		data = data[signLen+1:]
 		err = s.process(data, sign)
-		if err != nil {
-			log.Println("fail to process:", err)
-		}
+		// if err != nil {
+		// 	log.Println("fail to process:", err)
+		// }
 	}
 }
 
@@ -140,7 +140,7 @@ func (s *Session) Send(msg interface{}) error {
 	enc := gob.NewEncoder(&buf)
 	err := enc.Encode(e)
 	if err != nil {
-		log.Println("fail to encode msg:", err)
+		// log.Println("fail to encode msg:", err)
 		return err
 	}
 	data := buf.Bytes()
@@ -177,13 +177,13 @@ func (s *Session) process(data, sign []byte) error {
 	var e Event
 	err := dec.Decode(&e)
 	if err != nil {
-		log.Println("decode error:", err)
+		// log.Println("decode error:", err)
 		return err
 	}
 	e.session = s
 	if bytes.Compare(s.selfID, e.To) != 0 {
 		s.Close()
-		log.Printf("error self id:%x,hope:%x\n", e.To, s.selfID)
+		// log.Printf("error self id:%x,hope:%x\n", e.To, s.selfID)
 		return errors.New("error self id")
 	}
 	if len(s.peerID) == 0 {
@@ -197,13 +197,13 @@ func (s *Session) process(data, sign []byte) error {
 		s.Close()
 		return errors.New("error peer id")
 	}
-	log.Printf("sign info.self:%x,sign:%x,peer:%x\n", s.selfID, sign, s.peerID)
+	// log.Printf("sign info.self:%x,sign:%x,peer:%x\n", s.selfID, sign, s.peerID)
 	check := s.mgr.cryp.Verify(e.SignType, data, sign, s.peerID)
 	if !check {
 		s.Close()
 		return errors.New("error sign")
 	}
-	log.Printf("event:%#v\n", e)
+	// log.Printf("event:%#v\n", e)
 	for _, p := range s.mgr.plugins {
 		p.Receive(&e)
 	}
