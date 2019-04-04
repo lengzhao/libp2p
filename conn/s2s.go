@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"github.com/lengzhao/libp2p"
-	"log"
 	"net"
 	"net/url"
 	"sync"
@@ -88,7 +87,7 @@ func (c *S2SPool) Dial(addr string) (libp2p.Conn, error) {
 		return nil, errors.New("unknow user id")
 	}
 	if !c.active {
-		log.Println("s2s server is not active,dial udp:", addr)
+		// log.Println("s2s server is not active,dial udp:", addr)
 		conn, err := net.Dial("udp", u.Host)
 		if err != nil {
 			return nil, err
@@ -207,9 +206,9 @@ func (c *s2sConn) Read(b []byte) (n int, err error) {
 		defer c.rto.Stop()
 		select {
 		case c.buff = <-c.cached:
-			log.Println("read data:", c.LocalAddr().String())
+			// log.Println("read data:", c.LocalAddr().String())
 		case <-c.rto.C:
-			log.Println("read timeout:", c.LocalAddr().String())
+			// log.Println("read timeout:", c.LocalAddr().String())
 			return 0, errors.New("read timeout")
 		}
 	}

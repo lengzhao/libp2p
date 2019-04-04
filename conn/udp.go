@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"github.com/lengzhao/libp2p"
-	"log"
 	"net"
 	"net/url"
 	"sync"
@@ -67,7 +66,7 @@ func (c *UDPPool) Listen(addr string, handle func(libp2p.Conn)) error {
 			go handle(conn)
 		}
 		c.mu.Unlock()
-		log.Println("receive:", address, string(data[:n]))
+		// log.Println("receive:", address, string(data[:n]))
 		conn.cache(data[:n])
 	}
 }
@@ -194,9 +193,9 @@ func (c *udpConn) Read(b []byte) (n int, err error) {
 		defer c.to.Stop()
 		select {
 		case c.buff = <-c.cached:
-			log.Println("read data:", c.LocalAddr().String())
+			// log.Println("read data:", c.LocalAddr().String())
 		case <-c.to.C:
-			log.Println("read timeout:", c.LocalAddr().String())
+			// log.Println("read timeout:", c.LocalAddr().String())
 			return 0, errors.New("read timeout")
 		}
 	}
@@ -232,7 +231,7 @@ func (c *udpConn) Close() error {
 	default:
 		close(c.die)
 		c.Write(closeData)
-		log.Println("close udpConn:", c.peer.String())
+		// log.Println("close udpConn:", c.peer.String())
 		c.to.Stop()
 		c.conn.removeConn(c.peer.String())
 	}
