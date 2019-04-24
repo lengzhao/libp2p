@@ -19,6 +19,7 @@ type Ping struct {
 // Pong dht pong
 type Pong struct {
 	FromAddr string
+	IsServer bool
 }
 
 // Find find other nodes
@@ -85,7 +86,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 	switch msg := e.GetMessage().(type) {
 	case Ping:
 		// log.Printf("Ping from <%s>\n", msg.FromAddr)
-		e.Reply(Pong{d.address})
+		e.Reply(Pong{d.address, e.GetSession().GetSelfAddr().IsServer()})
 		peer := e.GetSession().GetPeerAddr()
 		if peer.IsServer() {
 			rst := d.addNode(peer.String())
@@ -111,7 +112,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		// log.Printf("Pong from <%s>\n", msg.FromAddr)
 		e.Reply(Find{d.self})
 		peer := e.GetSession().GetPeerAddr()
-		if peer.IsServer() {
+		if peer.IsServer() || msg.IsServer {
 			d.addNode(peer.String())
 		} else {
 			u1, _ := url.Parse(peer.String())
@@ -154,7 +155,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 
 			session, err := d.net.NewSession(addr)
 			if err != nil {
-				log.Println("fail to new session:", addr, err)
+				// log.Println("fail to new session:", addr, err)
 				continue
 			}
 			err = session.Send(Ping{d.address})
@@ -175,12 +176,12 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		// log.Printf("Traversal peer:<%x>, from:%s, to:%s \n", e.GetPeerID(), msg.FromAddr, msg.ToAddr)
 		fu, err := url.Parse(msg.FromAddr)
 		if err != nil {
-			log.Println("error address:", msg.FromAddr, err)
+			// log.Println("error address:", msg.FromAddr, err)
 			return nil
 		}
 		tu, err := url.Parse(msg.ToAddr)
 		if err != nil {
-			log.Println("error address:", msg.FromAddr, err)
+			// log.Println("error address:", msg.FromAddr, err)
 			return nil
 		}
 		fid, err := hex.DecodeString(fu.User.Username())
@@ -250,7 +251,6 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 // if is new node,return true
 func (d *DiscoveryPlugin) addNode(address string) (bNew bool) {
 	bNew = false
-	//log.Println("dht try add address:", address)
 	u, err := url.Parse(address)
 	if err != nil {
 		return
@@ -265,8 +265,7 @@ func (d *DiscoveryPlugin) addNode(address string) (bNew bool) {
 	node := new(dht.NodeID)
 	node.PublicKey = id
 	node.Address = address
-	d.dht.Add(node)
-	// bNew = d.dht.Add(node)
+	bNew = d.dht.Add(node)
 	// if bNew {
 	// 	log.Println("dht add address:", address)
 	// }
