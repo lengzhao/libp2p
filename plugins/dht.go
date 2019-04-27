@@ -44,8 +44,7 @@ type DiscoveryPlugin struct {
 	mu      sync.Mutex
 	self    []byte
 	dht     *dht.TDHT
-	conns   map[string]bool
-	Filter  bool
+	conns   map[string]libp2p.Session
 	address string
 	net     libp2p.Network
 	scheme  string
@@ -73,7 +72,7 @@ func (d *DiscoveryPlugin) Startup(net libp2p.Network) {
 
 	d.self = node.PublicKey
 	d.dht = dht.CreateDHT(node)
-	d.conns = make(map[string]bool)
+	d.conns = make(map[string]libp2p.Session)
 	d.address = node.Address
 	d.net = net
 	d.scheme = u.Scheme
@@ -149,7 +148,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 				continue
 			}
 
-			if d.conns[pu.User.Username()] {
+			if d.conns[pu.User.Username()] != nil {
 				continue
 			}
 
@@ -194,7 +193,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		}
 		// dst
 		if bytes.Compare(tid, d.self) == 0 {
-			if d.conns[fu.User.Username()] {
+			if d.conns[fu.User.Username()] != nil {
 				return nil
 			}
 			session, err := d.net.NewSession(msg.FromAddr)
@@ -204,16 +203,14 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			session.Send(Ping{d.address})
 			// log.Println("Traversal dst, send DhtPing to:", msg.FromAddr)
 		} else if bytes.Compare(fid, e.GetPeerID()) == 0 { //proxy
-			if !d.conns[tu.User.Username()] {
+			if d.conns[fu.User.Username()] == nil {
 				return nil
 			}
-			if !d.conns[fu.User.Username()] {
+			session := d.conns[tu.User.Username()]
+			if session == nil {
 				return nil
 			}
-			session, err := d.net.NewSession(msg.ToAddr)
-			if err != nil {
-				return nil
-			}
+
 			peer := e.GetSession().GetPeerAddr().String()
 			pu, err := url.Parse(peer)
 			if err == nil {
@@ -222,27 +219,6 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 				}
 			}
 			session.Send(msg)
-		}
-	default:
-		if !d.Filter {
-			return nil
-		}
-		address := e.GetSession().GetPeerAddr().String()
-		u, err := url.Parse(address)
-		if err != nil {
-			panic(err)
-		}
-		id, err := hex.DecodeString(u.User.Username())
-		if err != nil {
-			panic(err)
-		}
-		node := new(dht.NodeID)
-		node.PublicKey = id
-		node.Address = address
-		exist := d.dht.NodeExists(node)
-		if !exist {
-			e.GetSession().Close()
-			panic("not in dht")
 		}
 	}
 	return nil
@@ -279,7 +255,7 @@ func (d *DiscoveryPlugin) PeerConnect(s libp2p.Session) {
 	// log.Println("new peer:", un, len(d.conns))
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.conns[un] = true
+	d.conns[un] = s
 }
 
 // PeerDisconnect is called every time a PeerSession connection is closed
