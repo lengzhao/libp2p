@@ -4,13 +4,15 @@ import (
 	"bytes"
 	"encoding/hex"
 	"errors"
-	"github.com/lengzhao/libp2p"
-	"github.com/lengzhao/libp2p/conn"
-	"github.com/lengzhao/libp2p/crypto"
+	"expvar"
 	"log"
 	"net/url"
 	"runtime/debug"
 	"sync"
+
+	"github.com/lengzhao/libp2p"
+	"github.com/lengzhao/libp2p/conn"
+	"github.com/lengzhao/libp2p/crypto"
 )
 
 // Manager network manager
@@ -23,6 +25,8 @@ type Manager struct {
 	connPool libp2p.ConnPoolMgr
 	cryp     libp2p.CryptoMgr
 }
+
+var stat = expvar.NewMap("net_mgr")
 
 // New new network manager
 func New() *Manager {
@@ -99,10 +103,12 @@ func (m *Manager) NewSession(address string) (libp2p.Session, error) {
 		return nil, err
 	}
 	s := newSession(m, conn, id, false)
+	stat.Add("NewSession", 1)
 	return s, nil
 }
 
 func (m *Manager) process(conn libp2p.Conn) {
+	stat.Add("process", 1)
 	newSession(m, conn, nil, true)
 }
 

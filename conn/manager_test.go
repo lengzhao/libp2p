@@ -120,15 +120,15 @@ func runCloseByClient(addr1, addr2 string) error {
 	s1.Close()
 	serData = <-h.Data
 	if serData != nil {
-		return errors.New("fail to close connection")
+		return errors.New("fail to close connection,"+string(serData))
 	}
 
 	return nil
 }
 
 func TestManager1(t *testing.T) {
-	addr1 := "ws://127.0.0.1:3000/echo"
-	addr2 := "ws://127.0.0.1:3001/echo"
+	addr1 := "ws://addr1@127.0.0.1:3000/echo"
+	addr2 := "ws://addr2@127.0.0.1:3001/echo"
 	err := runCloseByServer(addr1, addr2)
 	if err != nil {
 		t.Error(err)
@@ -139,8 +139,8 @@ func TestManager1(t *testing.T) {
 	}
 }
 func TestManager2(t *testing.T) {
-	addr1 := "udp://127.0.0.1:3000/echo"
-	addr2 := "udp://127.0.0.1:3001/echo"
+	addr1 := "udp://addr1@127.0.0.1:3000/echo"
+	addr2 := "udp://addr2@127.0.0.1:3001/echo"
 	err := runCloseByServer(addr1, addr2)
 	if err != nil {
 		t.Error(err)
@@ -151,8 +151,8 @@ func TestManager2(t *testing.T) {
 	}
 }
 func TestManager3(t *testing.T) {
-	addr1 := "s2s://127.0.0.1:3000/echo"
-	addr2 := "s2s://127.0.0.1:3001/echo"
+	addr1 := "s2s://addr1@127.0.0.1:3000/echo"
+	addr2 := "s2s://addr2@127.0.0.1:3001/echo"
 	err := runCloseByServer(addr1, addr2)
 	if err != nil {
 		t.Error(err)
@@ -163,8 +163,8 @@ func TestManager3(t *testing.T) {
 	}
 }
 func TestManager4(t *testing.T) {
-	addr1 := "tcp://127.0.0.1:3000/echo"
-	addr2 := "tcp://127.0.0.1:3001/echo"
+	addr1 := "tcp://addr1@127.0.0.1:3000/echo"
+	addr2 := "tcp://addr2@127.0.0.1:3001/echo"
 	err := runCloseByServer(addr1, addr2)
 	if err != nil {
 		t.Error(err)
@@ -177,8 +177,8 @@ func TestManager4(t *testing.T) {
 
 // udp client io timeout
 // func TestManager5(t *testing.T) {
-// 	addr1 := "udp://127.0.0.1:3000/echo"
-// 	addr2 := "udp://127.0.0.1:3001/echo"
+// 	addr1 := "udp://addr1@127.0.0.1:3000/echo"
+// 	addr2 := "udp://addr2@127.0.0.1:3001/echo"
 
 // 	h := new(Handler2)
 // 	h.Data = make(chan []byte)

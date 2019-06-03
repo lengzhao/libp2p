@@ -3,11 +3,12 @@ package network
 import (
 	"encoding/gob"
 	"errors"
-	"github.com/lengzhao/libp2p"
-	"github.com/lengzhao/libp2p/plugins"
 	"log"
 	"testing"
 	"time"
+
+	"github.com/lengzhao/libp2p"
+	"github.com/lengzhao/libp2p/plugins"
 )
 
 type Inner struct {
@@ -79,8 +80,8 @@ func runTest(addr1, addr2 string) error {
 
 func TestNew(t *testing.T) {
 	log.Println("start test:", t.Name())
-	addr1 := "tcp://127.0.0.1:8081"
-	addr2 := "tcp://127.0.0.1:8082"
+	addr1 := "tcp://addr1@127.0.0.1:8081"
+	addr2 := "tcp://addr2@127.0.0.1:8082"
 	err := runTest(addr1, addr2)
 	if err != nil {
 		t.Error("error:", err)
@@ -89,8 +90,8 @@ func TestNew(t *testing.T) {
 
 func TestNew2(t *testing.T) {
 	log.Println("start test:", t.Name())
-	addr1 := "udp://127.0.0.1:8081"
-	addr2 := "udp://127.0.0.1:8082"
+	addr1 := "udp://addr1@127.0.0.1:8081"
+	addr2 := "udp://addr2@127.0.0.1:8082"
 	err := runTest(addr1, addr2)
 	if err != nil {
 		t.Error("error:", err)
@@ -100,8 +101,8 @@ func TestNew2(t *testing.T) {
 
 func TestNew3(t *testing.T) {
 	log.Println("start test:", t.Name())
-	addr1 := "ws://127.0.0.1:8081/echo"
-	addr2 := "ws://127.0.0.1:8082/echo"
+	addr1 := "ws://addr1@127.0.0.1:8081/echo"
+	addr2 := "ws://addr2@127.0.0.1:8082/echo"
 	err := runTest(addr1, addr2)
 	if err != nil {
 		t.Error("error:", err)
@@ -110,8 +111,8 @@ func TestNew3(t *testing.T) {
 
 func TestNew4(t *testing.T) {
 	log.Println("start test:", t.Name())
-	addr1 := "s2s://127.0.0.1:8081"
-	addr2 := "s2s://127.0.0.1:8082"
+	addr1 := "s2s://addr1@127.0.0.1:8081"
+	addr2 := "s2s://addr2@127.0.0.1:8082"
 	err := runTest(addr1, addr2)
 	if err != nil {
 		t.Error("error:", err)
@@ -126,13 +127,26 @@ type ConnCount struct {
 
 // PeerConnect is called every time a Session is initialized and connected
 func (p *ConnCount) PeerConnect(s libp2p.Session) {
+	log.Println("new connection:", s.GetSelfAddr(), s.GetPeerAddr())
+	s.SetEnv("inDHT", "true")
 	p.ConnNum++
 }
 
 // PeerDisconnect is called every time a Session connection is closed
 func (p *ConnCount) PeerDisconnect(s libp2p.Session) {
+	// log.Println("disconnect:", s.GetSelfAddr(), s.GetPeerAddr())
 	p.DisconnNum++
 }
+
+// func (p *ConnCount) Receive(e libp2p.Event) error {
+// 	switch msg := e.GetMessage().(type) {
+// 	default:
+// 		log.Printf("event:%T,selfID:%s,peerID:%x,peerAddr%s\n",
+// 			msg, e.GetSession().GetSelfAddr().User(),
+// 			e.GetPeerID(), e.GetSession().GetSelfAddr())
+// 	}
+// 	return nil
+// }
 
 func runTest2(addrs ...string) error {
 	gob.Register(Inner{})
@@ -152,14 +166,18 @@ func runTest2(addrs ...string) error {
 			time.Sleep(time.Millisecond * 10)
 		}
 		if mgr != nil {
+			time.Sleep(time.Millisecond * 100)
 			addr1 := mgr.GetAddress()
 			s, err := m.NewSession(addr1)
 			if err != nil {
+				log.Println("fail to new session.", m.GetAddress(), "->", addr1)
 				return err
 			}
 			defer s.Close()
+			// err = s.Send(plugins.Ping{FromAddr: s.GetSelfAddr().String()})
 			err = s.Send(Inner{2})
 			if err != nil {
+				log.Println("fail to send.", s.GetSelfAddr(), "->", s.GetPeerAddr())
 				return err
 			}
 		}
@@ -169,7 +187,7 @@ func runTest2(addrs ...string) error {
 	time.Sleep(2 * time.Second)
 
 	if plugin.ConnNum != len(addrs)-1 {
-		log.Printf("error status,conn:%d,disconn:%d\n", plugin.ConnNum, plugin.DisconnNum)
+		log.Printf("error status,conn:%d,disconn:%d,hope:%d\n", plugin.ConnNum, plugin.DisconnNum, len(addrs)-1)
 		return errors.New("error status")
 	}
 	log.Println("-----------------finish-------------------")
@@ -178,11 +196,11 @@ func runTest2(addrs ...string) error {
 
 func TestNew5(t *testing.T) {
 	log.Println("start test:", t.Name())
-	addr1 := "s2s://127.0.0.1:8081"
-	addr2 := "s2s://127.0.0.1:8082"
-	addr3 := "s2s://127.0.0.1:8083"
-	addr4 := "s2s://127.0.0.1:8084"
-	addr5 := "s2s://127.0.0.1:8085"
+	addr1 := "s2s://addr1@127.0.0.1:8081"
+	addr2 := "s2s://addr2@127.0.0.1:8082"
+	addr3 := "s2s://addr3@127.0.0.1:8083"
+	addr4 := "s2s://addr4@127.0.0.1:8084"
+	addr5 := "s2s://addr5@127.0.0.1:8085"
 	err := runTest2(addr1, addr2, addr3, addr4, addr5)
 	// err := runTest2(addr1, addr2, addr3)
 	if err != nil {
@@ -193,15 +211,25 @@ func TestNew5(t *testing.T) {
 
 func TestNew6(t *testing.T) {
 	log.Println("start test:", t.Name())
-	addr1 := "s2s://127.0.0.1:8081"
-	addr2 := "s2s://127.0.0.1:8082"
-	addr3 := "udp://127.0.0.1:8083"
-	addr4 := "s2s://127.0.0.1:8084"
-	addr5 := "s2s://127.0.0.1:8085"
+	addr1 := "s2s://addr1@127.0.0.1:8081"
+	addr2 := "s2s://addr2@127.0.0.1:8082"
+	addr3 := "udp://addr3@127.0.0.1:8083"
+	addr4 := "tcp://addr4@127.0.0.1:8084"
+	addr5 := "ws://addr5@127.0.0.1:8085/test6"
 	err := runTest2(addr1, addr2, addr3, addr4, addr5)
-	// err := runTest2(addr1, addr2, addr3)
 	if err != nil {
 		t.Error("error:", err)
 	}
-	// t.Error("error:")
+	err = runTest2(addr1, addr2, addr5, addr4, addr3)
+	if err != nil {
+		t.Error("error:", err)
+	}
+	err = runTest2(addr1, addr2, addr5, addr3, addr4)
+	if err != nil {
+		t.Error("error:", err)
+	}
+	err = runTest2(addr2, addr5, addr3, addr4, addr1)
+	if err != nil {
+		t.Error("error:", err)
+	}
 }

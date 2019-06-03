@@ -1,14 +1,17 @@
 package plugins
 
 import (
+	"time"
 	"bytes"
 	"encoding/gob"
 	"encoding/hex"
-	"github.com/lengzhao/libp2p"
-	"github.com/lengzhao/libp2p/dht"
+	"expvar"
 	"log"
 	"net/url"
 	"sync"
+
+	"github.com/lengzhao/libp2p"
+	"github.com/lengzhao/libp2p/dht"
 )
 
 // Ping dht ping
@@ -41,14 +44,23 @@ type NatTraversal struct {
 // DiscoveryPlugin discovery plugin of dht
 type DiscoveryPlugin struct {
 	*libp2p.Plugin
-	mu      sync.Mutex
-	self    []byte
-	dht     *dht.TDHT
-	conns   map[string]libp2p.Session
-	address string
-	net     libp2p.Network
-	scheme  string
+	mu         sync.Mutex
+	self       []byte
+	dht        *dht.TDHT
+	conns      map[string]libp2p.Session
+	address    string
+	net        libp2p.Network
+	scheme     string
+	cmu        sync.Mutex
+	connecting map[string]int64
 }
+
+const (
+	envKey   = "inDHT"
+	envValue = "true"
+)
+
+var stat = expvar.NewMap("dht")
 
 func init() {
 	gob.Register(Ping{})
@@ -76,20 +88,24 @@ func (d *DiscoveryPlugin) Startup(net libp2p.Network) {
 	d.address = node.Address
 	d.net = net
 	d.scheme = u.Scheme
+	d.connecting = make(map[string]int64)
 }
 
 // Receive is called every time when messages are received
 func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 	// d.mu.Lock()
 	// defer d.mu.Unlock()
+	stat.Add("event", 1)
 	switch msg := e.GetMessage().(type) {
 	case Ping:
 		// log.Printf("Ping from <%s>\n", msg.FromAddr)
+		stat.Add("Ping", 1)
 		e.Reply(Pong{d.address, e.GetSession().GetSelfAddr().IsServer()})
 		peer := e.GetSession().GetPeerAddr()
 		if peer.IsServer() {
 			rst := d.addNode(peer.String())
 			if rst {
+				e.GetSession().SetEnv(envKey, envValue)
 				e.Reply(Find{d.self})
 			}
 		} else {
@@ -103,16 +119,21 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			}
 			rst := d.addNode(msg.FromAddr)
 			if rst {
+				e.GetSession().SetEnv(envKey, envValue)
 				e.Reply(Find{d.self})
 			}
 		}
 
 	case Pong:
-		// log.Printf("Pong from <%s>\n", msg.FromAddr)
+		// log.Printf("Pong from <%s> %t, self:%s\n", msg.FromAddr, msg.IsServer, e.GetSession().GetSelfAddr())
+		stat.Add("Pong", 1)
 		e.Reply(Find{d.self})
 		peer := e.GetSession().GetPeerAddr()
 		if peer.IsServer() || msg.IsServer {
-			d.addNode(peer.String())
+			rst := d.addNode(peer.String())
+			if rst {
+				e.GetSession().SetEnv(envKey, envValue)
+			}
 		} else {
 			u1, _ := url.Parse(peer.String())
 			u2, _ := url.Parse(msg.FromAddr)
@@ -122,9 +143,13 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			if u1.Hostname() != u2.Hostname() {
 				return nil
 			}
-			d.addNode(msg.FromAddr)
+			rst := d.addNode(msg.FromAddr)
+			if rst {
+				e.GetSession().SetEnv(envKey, envValue)
+			}
 		}
 	case Find:
+		stat.Add("Find", 1)
 		// log.Printf("Find from <%s>\n", e.GetSession().GetPeerAddr())
 		peer := new(dht.NodeID)
 		peer.PublicKey = msg.Key
@@ -139,21 +164,28 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		for i, node := range nodes {
 			resp.Addresses[i] = node.GetAddresses()
 		}
+		// log.Printf("Find from <%x> %d, self:%s\n", e.GetPeerID(), len(nodes), e.GetSession().GetSelfAddr())
 		e.Reply(resp)
 	case Nodes:
-		for _, addr := range msg.Addresses {
+		stat.Add("Nodes", 1)
+		for i, addr := range msg.Addresses {
+			if i > dht.BucketSize{
+				break
+			}
 			pu, err := url.Parse(addr)
 			if err != nil {
 				log.Println("fail to parse adddress:", addr, err)
 				continue
 			}
-
+			d.mu.Lock()
 			if d.conns[pu.User.Username()] != nil {
+				d.mu.Unlock()
 				continue
 			}
+			d.mu.Unlock()
 
-			session, err := d.net.NewSession(addr)
-			if err != nil {
+			session := d.newConn(addr)
+			if session == nil {
 				// log.Println("fail to new session:", addr, err)
 				continue
 			}
@@ -172,6 +204,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			}
 		}
 	case NatTraversal:
+		stat.Add("NatTraversal", 1)
 		// log.Printf("Traversal peer:<%x>, from:%s, to:%s \n", e.GetPeerID(), msg.FromAddr, msg.ToAddr)
 		fu, err := url.Parse(msg.FromAddr)
 		if err != nil {
@@ -193,20 +226,26 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		}
 		// dst
 		if bytes.Compare(tid, d.self) == 0 {
+			d.mu.Lock()
 			if d.conns[fu.User.Username()] != nil {
+				d.mu.Unlock()
 				return nil
 			}
-			session, err := d.net.NewSession(msg.FromAddr)
-			if err != nil {
+			d.mu.Unlock()
+			session := d.newConn(msg.FromAddr)
+			if session == nil {
 				return nil
 			}
 			session.Send(Ping{d.address})
 			// log.Println("Traversal dst, send DhtPing to:", msg.FromAddr)
 		} else if bytes.Compare(fid, e.GetPeerID()) == 0 { //proxy
+			d.mu.Lock()
 			if d.conns[fu.User.Username()] == nil {
+				d.mu.Unlock()
 				return nil
 			}
 			session := d.conns[tu.User.Username()]
+			d.mu.Unlock()
 			if session == nil {
 				return nil
 			}
@@ -220,6 +259,14 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			}
 			session.Send(msg)
 		}
+	default:
+		stat := e.GetSession().GetEnv(envKey)
+		if stat == envValue {
+			return nil
+		}
+		// not in dht,not accept any other message
+		// you can set env to accept the message:e.GetSession().SetEnv(envKey, envValue)
+		e.GetSession().Close()
 	}
 	return nil
 }
@@ -253,6 +300,9 @@ func (d *DiscoveryPlugin) PeerConnect(s libp2p.Session) {
 	un := s.GetPeerAddr().User()
 	go s.Send(Ping{d.address})
 	// log.Println("new peer:", un, len(d.conns))
+	d.cmu.Lock()
+	delete(d.connecting,un)
+	d.cmu.Unlock()
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.conns[un] = s
@@ -279,4 +329,39 @@ func (d *DiscoveryPlugin) PeerDisconnect(s libp2p.Session) {
 	defer d.mu.Unlock()
 	d.dht.RemoveNode(&node)
 	delete(d.conns, un)
+}
+
+func (d *DiscoveryPlugin)newConn(addr string)libp2p.Session{
+	u,err := url.Parse(addr)
+	if err != nil || u.User == nil{
+		return nil
+	}
+	user := u.User.Username()
+	if user == ""{
+		return nil
+	}
+	var conn libp2p.Session
+	d.mu.Lock()
+	conn = d.conns[user]
+	d.mu.Unlock()
+	if conn != nil{
+		return conn
+	}
+	now := time.Now().Unix()
+	d.cmu.Lock()
+	for k,v := range d.connecting{
+		if v < now{
+			delete(d.connecting,k)
+		}
+	}
+	t := d.connecting[user]
+	if t > now || len(d.connecting) > 100{
+		d.cmu.Unlock()
+		// log.Println("try to reconnect:", user)
+		return nil
+	}
+	d.connecting[user] = now + int64(time.Second*10)
+	d.cmu.Unlock()
+	conn,_ = d.net.NewSession(addr)
+	return conn
 }

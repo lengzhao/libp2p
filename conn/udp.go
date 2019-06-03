@@ -3,11 +3,12 @@ package conn
 import (
 	"bytes"
 	"errors"
-	"github.com/lengzhao/libp2p"
 	"net"
 	"net/url"
 	"sync"
 	"time"
+
+	"github.com/lengzhao/libp2p"
 )
 
 // UDPPool connection over udp,it could lose message.
@@ -19,6 +20,8 @@ type UDPPool struct {
 	server  net.PacketConn
 	conns   map[string]*udpConn
 }
+
+const maxTimeout = 10 * time.Minute
 
 // Listen listen
 func (c *UDPPool) Listen(addr string, handle func(libp2p.Conn)) error {
@@ -34,6 +37,7 @@ func (c *UDPPool) Listen(addr string, handle func(libp2p.Conn)) error {
 	if err != nil {
 		return err
 	}
+	u.Host = c.server.LocalAddr().String()
 
 	c.scheme = u.Scheme
 	c.address = newAddr(u, true)
@@ -46,7 +50,7 @@ func (c *UDPPool) Listen(addr string, handle func(libp2p.Conn)) error {
 			return nil
 		}
 		address := peer.String()
-		if n == len(closeData) && bytes.Compare(data[:5], closeData) == 0 {
+		if n == len(closeData) && bytes.Compare(data[:n], closeData) == 0 {
 			c.mu.Lock()
 			conn, ok := c.conns[address]
 			if ok {
@@ -72,17 +76,8 @@ func (c *UDPPool) Listen(addr string, handle func(libp2p.Conn)) error {
 }
 
 type udpClient struct {
-	net.Conn
-	peerAddr *dfAddr
-	selfAddr *dfAddr
-}
-
-func (c *udpClient) RemoteAddr() libp2p.Addr {
-	return c.peerAddr
-}
-
-func (c *udpClient) LocalAddr() libp2p.Addr {
-	return c.selfAddr
+	dfConn
+	timeout time.Duration
 }
 
 func (c *udpClient) Close() error {
@@ -91,7 +86,7 @@ func (c *udpClient) Close() error {
 }
 
 func (c *udpClient) Read(data []byte) (int, error) {
-	c.Conn.SetReadDeadline(time.Now().Add(time.Minute * 10))
+	c.Conn.SetReadDeadline(time.Now().Add(c.timeout))
 	n, err := c.Conn.Read(data)
 	if err != nil {
 		return 0, err
@@ -99,6 +94,9 @@ func (c *udpClient) Read(data []byte) (int, error) {
 	if n == len(closeData) && bytes.Compare(data[:n], closeData) == 0 {
 		defer c.Conn.Close()
 		return 0, errors.New("closed")
+	}
+	if 2*c.timeout <= maxTimeout {
+		c.timeout = 2 * c.timeout
 	}
 	return n, err
 }
@@ -120,6 +118,7 @@ func (c *UDPPool) Dial(addr string) (libp2p.Conn, error) {
 	u2.Host = conn.LocalAddr().String()
 	u2.User = nil
 	out.selfAddr = newAddr(u2, false)
+	out.timeout = 10 * time.Second
 	return out, nil
 }
 
@@ -138,11 +137,6 @@ func (c *UDPPool) removeConn(addr string) {
 	c.mu.Lock()
 	delete(c.conns, addr)
 	c.mu.Unlock()
-}
-
-// Addr returns the listener's network address.
-func (c *UDPPool) Addr() net.Addr {
-	return c.server.LocalAddr()
 }
 
 type udpConn struct {
@@ -165,7 +159,7 @@ func newUDPConn(p *UDPPool, addr net.Addr) *udpConn {
 	out.conn = p
 	out.peer = addr
 	out.active = true
-	out.timeout = 10 * time.Minute
+	out.timeout = 10 * time.Second
 	out.to = time.NewTimer(out.timeout)
 	out.die = make(chan bool)
 	out.selfAddr = p.address
@@ -178,6 +172,7 @@ func newUDPConn(p *UDPPool, addr net.Addr) *udpConn {
 
 func (c *udpConn) cache(data []byte) {
 	select {
+	case <-c.die:
 	case c.cached <- data:
 	default:
 	}
@@ -192,6 +187,7 @@ func (c *udpConn) Read(b []byte) (n int, err error) {
 		c.to.Reset(c.timeout)
 		defer c.to.Stop()
 		select {
+		case <-c.die:
 		case c.buff = <-c.cached:
 			// log.Println("read data:", c.LocalAddr().String())
 		case <-c.to.C:
@@ -209,6 +205,9 @@ func (c *udpConn) Read(b []byte) (n int, err error) {
 		c.buff = nil
 	} else {
 		c.buff = c.buff[n:]
+	}
+	if 2*c.timeout <= maxTimeout {
+		c.timeout = 2 * c.timeout
 	}
 
 	return
