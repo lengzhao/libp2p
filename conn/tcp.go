@@ -1,10 +1,11 @@
 package conn
 
 import (
-	"github.com/lengzhao/libp2p"
 	"log"
 	"net"
 	"net/url"
+
+	"github.com/lengzhao/libp2p"
 )
 
 // TCPPool default connection,such as:tcp,unix
@@ -25,6 +26,7 @@ func (c *TCPPool) Listen(addr string, handle func(libp2p.Conn)) error {
 		log.Println("fail to listen address.addr:", u.Scheme, u.Host, err)
 		return err
 	}
+	u.Host = c.l.Addr().String()
 	c.addr = newAddr(u, true)
 	for {
 		conn, err := c.l.Accept()

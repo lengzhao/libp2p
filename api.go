@@ -88,6 +88,8 @@ type Session interface {
 	Send(interface{}) error
 	GetPeerAddr() Addr
 	GetSelfAddr() Addr
+	SetEnv(key, value string)
+	GetEnv(key string) string
 	Close()
 }
 

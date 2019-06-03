@@ -1,11 +1,12 @@
 package conn
 
 import (
-	"github.com/lengzhao/libp2p"
-	"golang.org/x/net/websocket"
 	"log"
 	"net/http"
 	"net/url"
+
+	"github.com/lengzhao/libp2p"
+	"golang.org/x/net/websocket"
 )
 
 // WSPool websocker pool
@@ -34,6 +35,7 @@ func (c *WSPool) Listen(addr string, handle func(libp2p.Conn)) error {
 func (c *WSPool) handler(conn *websocket.Conn) {
 	peer, _ := url.Parse(conn.RemoteAddr().String())
 	peer.Scheme = c.addr.Scheme()
+	peer.Path = "client"
 	out := new(dfConn)
 	out.Conn = conn
 	out.peerAddr = newAddr(peer, false)
@@ -61,20 +63,10 @@ func (c *WSPool) Dial(addr string) (libp2p.Conn, error) {
 	out.Conn = conn
 	out.peerAddr = newAddr(u, true)
 	u2, _ := url.Parse(conn.LocalAddr().String())
+	u2.Host = conn.LocalAddr().String()
 	u2.Scheme = out.peerAddr.Scheme()
 	u2.User = nil
+	u2.Path = "client"
 	out.selfAddr = newAddr(u2, false)
 	return out, nil
-}
-
-type wsConn struct {
-	*websocket.Conn
-	flag chan bool
-}
-
-// Close closes the connection.
-// Any blocked Read or Write operations will be unblocked and return errors.
-func (conn *wsConn) Close() error {
-	conn.flag <- true
-	return conn.Conn.Close()
 }

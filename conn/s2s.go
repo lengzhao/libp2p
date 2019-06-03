@@ -3,11 +3,13 @@ package conn
 import (
 	"bytes"
 	"errors"
-	"github.com/lengzhao/libp2p"
+	"log"
 	"net"
 	"net/url"
 	"sync"
 	"time"
+
+	"github.com/lengzhao/libp2p"
 )
 
 // S2SPool udp server to udp server.
@@ -22,6 +24,13 @@ type S2SPool struct {
 }
 
 var closeData = []byte("_close")
+var keepaliveData = []byte("_alive")
+
+const (
+	connOpsClose = iota
+	connOpsKeepalive
+	connOpsData
+)
 
 // Listen listen
 func (c *S2SPool) Listen(addr string, handle func(libp2p.Conn)) error {
@@ -37,12 +46,14 @@ func (c *S2SPool) Listen(addr string, handle func(libp2p.Conn)) error {
 	if err != nil {
 		return err
 	}
+	u.Host = c.server.LocalAddr().String()
 
 	c.scheme = u.Scheme
 	c.address = newAddr(u, true)
 	c.active = true
 	c.conns = make(map[string]*s2sConn)
 	c.handle = handle
+	log.Println("listen:", c.address.String())
 	for {
 		data := make([]byte, 1500)
 		n, peer, err := c.server.ReadFrom(data)
@@ -50,30 +61,47 @@ func (c *S2SPool) Listen(addr string, handle func(libp2p.Conn)) error {
 			return nil
 		}
 		pAddr := peer.String()
-		if n == len(closeData) && bytes.Compare(data[:5], closeData) == 0 {
-			c.mu.Lock()
-			conn, ok := c.conns[pAddr]
-			if ok {
-				delete(c.conns, pAddr)
-			}
-			c.mu.Unlock()
-			if ok {
-				conn.Close()
-			}
-			continue
+		var ops = connOpsData
+		if n == len(closeData) && bytes.Compare(data[:n], closeData) == 0 {
+			ops = connOpsClose
+		} else if n == len(keepaliveData) && bytes.Compare(data[:n], keepaliveData) == 0 {
+			ops = connOpsKeepalive
 		}
 		c.mu.Lock()
 		conn, ok := c.conns[pAddr]
-		if !ok {
-			p, _ := url.Parse(addr)
-			p.Host = peer.String()
-			p.User = nil
-			conn = newS2SConn(c, newAddr(p, false), peer)
-			c.conns[pAddr] = conn
-			go handle(conn)
-		}
 		c.mu.Unlock()
-		conn.cache(data[:n])
+		switch ops {
+		case connOpsClose:
+			if ok {
+				c.mu.Lock()
+				delete(c.conns, pAddr)
+				c.mu.Unlock()
+				conn.Close()
+			}
+		case connOpsKeepalive:
+			if ok {
+				conn.rto.Reset(conn.timeout)
+			}
+		case connOpsData:
+			if !ok {
+				p, _ := url.Parse(addr)
+				p.Host = peer.String()
+				p.User = nil
+				conn = newS2SConn(c, newAddr(p, false), peer)
+				c.mu.Lock()
+				old := c.conns[pAddr]
+				c.conns[pAddr] = conn
+				c.mu.Unlock()
+				if old != nil {
+					old.Close()
+				}
+				go handle(conn)
+			}
+			conn.cache(data[:n])
+			if 2*conn.timeout < maxTimeout {
+				conn.timeout = 2 * conn.timeout
+			}
+		}
 	}
 }
 
@@ -95,6 +123,7 @@ func (c *S2SPool) Dial(addr string) (libp2p.Conn, error) {
 		out := new(udpClient)
 		out.Conn = conn
 		out.peerAddr = newAddr(u, true)
+		out.timeout = 10 * time.Second
 		u2, _ := url.Parse(addr)
 		u2.Host = conn.LocalAddr().String()
 		u2.User = nil
@@ -138,11 +167,6 @@ func (c *S2SPool) removeConn(addr string) {
 	c.mu.Unlock()
 }
 
-// Addr returns the listener's network address.
-func (c *S2SPool) Addr() net.Addr {
-	return c.server.LocalAddr()
-}
-
 type s2sConn struct {
 	mu     sync.Mutex
 	active bool
@@ -167,7 +191,7 @@ func newS2SConn(p *S2SPool, paddr *dfAddr, udpAddr net.Addr) *s2sConn {
 	out.peerAddr = paddr
 	out.peer = udpAddr
 	out.active = true
-	out.timeout = 10 * time.Minute
+	out.timeout = 10 * time.Second
 	out.rto = time.NewTimer(out.timeout)
 	out.wto = time.NewTimer(out.timeout / 3)
 	out.die = make(chan bool)
@@ -177,6 +201,7 @@ func newS2SConn(p *S2SPool, paddr *dfAddr, udpAddr net.Addr) *s2sConn {
 
 func (c *s2sConn) cache(data []byte) {
 	select {
+	case <-c.die:
 	case c.cached <- data:
 	default:
 	}
@@ -205,6 +230,7 @@ func (c *s2sConn) Read(b []byte) (n int, err error) {
 		c.rto.Reset(c.timeout)
 		defer c.rto.Stop()
 		select {
+		case <-c.die:
 		case c.buff = <-c.cached:
 			// log.Println("read data:", c.LocalAddr().String())
 		case <-c.rto.C:

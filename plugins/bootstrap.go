@@ -1,8 +1,9 @@
 package plugins
 
 import (
-	"github.com/lengzhao/libp2p"
 	"time"
+
+	"github.com/lengzhao/libp2p"
 )
 
 // Bootstrap bootstrap plugin
@@ -22,12 +23,13 @@ func NewBootstrap(addrs []string) *Bootstrap {
 func (d *Bootstrap) Startup(net libp2p.Network) {
 	go func() {
 		time.Sleep(2 * time.Second)
+		selfAddr := net.GetAddress()
 		for _, addr := range d.addrs {
 			s, err := net.NewSession(addr)
 			if err != nil {
 				continue
 			}
-			s.Send("bootstrap")
+			s.Send(Ping{selfAddr})
 		}
 	}()
 }

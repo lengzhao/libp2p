@@ -6,10 +6,11 @@ import (
 	"encoding/gob"
 	"encoding/hex"
 	"errors"
-	"github.com/lengzhao/libp2p"
 	"log"
 	"runtime/debug"
 	"sync"
+
+	"github.com/lengzhao/libp2p"
 )
 
 // Session session
@@ -23,6 +24,7 @@ type Session struct {
 	peerAddr string
 	peerID   []byte
 	selfID   []byte
+	env      sync.Map
 }
 
 const (
@@ -43,8 +45,6 @@ func newSession(m *Manager, conn libp2p.Conn, peer []byte, sync bool) *Session {
 		}
 	}
 
-	// log.Printf("new session,self:%s.peer:%s,server(%t)\n",
-	// 	conn.LocalAddr().String(), conn.RemoteAddr().String(), conn.RemoteAddr().IsServer())
 	if sync {
 		out.receive()
 	} else {
@@ -74,7 +74,7 @@ func (s *Session) receive() {
 		headBuf := make([]byte, 1500)
 		n, err := s.conn.Read(headBuf)
 		if err != nil {
-			log.Printf("conn(peer:%s) read err:%s\n", s.conn.RemoteAddr().String(), err)
+			// log.Printf("conn(peer:%s) read err:%s\n", s.conn.RemoteAddr().String(), err)
 			return
 		}
 		headBuf = headBuf[:n]
@@ -168,6 +168,7 @@ func (s *Session) process(data, sign []byte) error {
 	defer func() {
 		err := recover()
 		if err != nil {
+			stat.Add("recover", 1)
 			log.Println("[error]session process:", err)
 			log.Println(string(debug.Stack()))
 		}
@@ -178,12 +179,14 @@ func (s *Session) process(data, sign []byte) error {
 	err := dec.Decode(&e)
 	if err != nil {
 		// log.Println("decode error:", err)
+		stat.Add("err_event", 1)
 		return err
 	}
 	e.session = s
 	if bytes.Compare(s.selfID, e.To) != 0 {
 		s.Close()
 		// log.Printf("error self id:%x,hope:%x\n", e.To, s.selfID)
+		stat.Add("err_sid", 1)
 		return errors.New("error self id")
 	}
 	if len(s.peerID) == 0 {
@@ -195,14 +198,17 @@ func (s *Session) process(data, sign []byte) error {
 	}
 	if bytes.Compare(s.peerID, e.From) != 0 {
 		s.Close()
+		stat.Add("err_pid", 1)
 		return errors.New("error peer id")
 	}
 	// log.Printf("sign info.self:%x,sign:%x,peer:%x\n", s.selfID, sign, s.peerID)
 	check := s.mgr.cryp.Verify(e.SignType, data, sign, s.peerID)
 	if !check {
 		s.Close()
+		stat.Add("err_sign", 1)
 		return errors.New("error sign")
 	}
+	stat.Add("event", 1)
 	// log.Printf("event:%#v\n", e)
 	for _, p := range s.mgr.plugins {
 		p.Receive(&e)
@@ -228,4 +234,18 @@ func (s *Session) Close() {
 // GetNetwork get network
 func (s *Session) GetNetwork() libp2p.Network {
 	return s.mgr
+}
+
+// SetEnv set env
+func (s *Session) SetEnv(key, value string) {
+	s.env.Store(key, value)
+}
+
+// GetEnv get env
+func (s *Session) GetEnv(key string) string {
+	v, ok := s.env.Load(key)
+	if ok {
+		return v.(string)
+	}
+	return ""
 }

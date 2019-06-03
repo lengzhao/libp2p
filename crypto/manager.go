@@ -3,6 +3,7 @@ package crypto
 import (
 	"crypto/rand"
 	"errors"
+
 	"github.com/lengzhao/libp2p"
 )
 
@@ -27,6 +28,8 @@ func GetDefaultMgr() *Manager {
 	out := NewMgr()
 	k := new(NilKey)
 	out.Register(k)
+	out.privKey = make([]byte, 32)
+	rand.Read(out.privKey)
 	out.SetPrivKey(k.GetType(), nil)
 	return out
 }

@@ -2,12 +2,13 @@ package conn
 
 import (
 	"errors"
-	"github.com/lengzhao/libp2p"
 	"log"
 	"net"
 	"net/url"
 	"runtime/debug"
 	"sync"
+
+	"github.com/lengzhao/libp2p"
 )
 
 // PoolMgr pool manager
@@ -67,6 +68,10 @@ func (mgr *PoolMgr) Dial(addr string) (libp2p.Conn, error) {
 
 	if u.User == nil || u.User.Username() == "" {
 		return nil, errors.New("user=nil")
+	}
+
+	if u.Port() == "0" {
+		return nil, errors.New("error port")
 	}
 
 	pool, ok := mgr.pool[u.Scheme]
