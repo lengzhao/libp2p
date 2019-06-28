@@ -215,8 +215,7 @@ func (c *s2sConn) keepalive() {
 		case <-c.die:
 			return
 		case <-c.wto.C:
-			d := make([]byte, 6)
-			c.Write(d)
+			c.Write(keepaliveData)
 		}
 	}
 }

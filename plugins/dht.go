@@ -114,6 +114,9 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			if u1 == nil || u2 == nil {
 				return nil
 			}
+			if len(d.conns) < 100{
+				e.GetSession().SetEnv(envKey, envValue)
+			}
 			if u1.Hostname() != u2.Hostname() {
 				return nil
 			}
