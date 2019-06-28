@@ -1,7 +1,6 @@
 package plugins
 
 import (
-	"time"
 	"bytes"
 	"encoding/gob"
 	"encoding/hex"
@@ -9,6 +8,7 @@ import (
 	"log"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/lengzhao/libp2p"
 	"github.com/lengzhao/libp2p/dht"
@@ -114,9 +114,6 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			if u1 == nil || u2 == nil {
 				return nil
 			}
-			if len(d.conns) < 100{
-				e.GetSession().SetEnv(envKey, envValue)
-			}
 			if u1.Hostname() != u2.Hostname() {
 				return nil
 			}
@@ -172,7 +169,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 	case Nodes:
 		stat.Add("Nodes", 1)
 		for i, addr := range msg.Addresses {
-			if i > dht.BucketSize{
+			if i > dht.BucketSize {
 				break
 			}
 			pu, err := url.Parse(addr)
@@ -262,14 +259,6 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			}
 			session.Send(msg)
 		}
-	default:
-		stat := e.GetSession().GetEnv(envKey)
-		if stat == envValue {
-			return nil
-		}
-		// not in dht,not accept any other message
-		// you can set env to accept the message:e.GetSession().SetEnv(envKey, envValue)
-		e.GetSession().Close()
 	}
 	return nil
 }
@@ -304,7 +293,7 @@ func (d *DiscoveryPlugin) PeerConnect(s libp2p.Session) {
 	go s.Send(Ping{d.address})
 	// log.Println("new peer:", un, len(d.conns))
 	d.cmu.Lock()
-	delete(d.connecting,un)
+	delete(d.connecting, un)
 	d.cmu.Unlock()
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -334,37 +323,37 @@ func (d *DiscoveryPlugin) PeerDisconnect(s libp2p.Session) {
 	delete(d.conns, un)
 }
 
-func (d *DiscoveryPlugin)newConn(addr string)libp2p.Session{
-	u,err := url.Parse(addr)
-	if err != nil || u.User == nil{
+func (d *DiscoveryPlugin) newConn(addr string) libp2p.Session {
+	u, err := url.Parse(addr)
+	if err != nil || u.User == nil {
 		return nil
 	}
 	user := u.User.Username()
-	if user == ""{
+	if user == "" {
 		return nil
 	}
 	var conn libp2p.Session
 	d.mu.Lock()
 	conn = d.conns[user]
 	d.mu.Unlock()
-	if conn != nil{
+	if conn != nil {
 		return conn
 	}
 	now := time.Now().Unix()
 	d.cmu.Lock()
-	for k,v := range d.connecting{
-		if v < now{
-			delete(d.connecting,k)
+	for k, v := range d.connecting {
+		if v < now {
+			delete(d.connecting, k)
 		}
 	}
 	t := d.connecting[user]
-	if t > now || len(d.connecting) > 100{
+	if t > now || len(d.connecting) > 100 {
 		d.cmu.Unlock()
 		// log.Println("try to reconnect:", user)
 		return nil
 	}
 	d.connecting[user] = now + int64(time.Second*10)
 	d.cmu.Unlock()
-	conn,_ = d.net.NewSession(addr)
+	conn, _ = d.net.NewSession(addr)
 	return conn
 }
