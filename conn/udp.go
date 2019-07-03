@@ -21,7 +21,7 @@ type UDPPool struct {
 	conns   map[string]*udpConn
 }
 
-const maxTimeout = 10 * time.Minute
+const maxTimeout = time.Minute
 
 // Listen listen
 func (c *UDPPool) Listen(addr string, handle func(libp2p.Conn)) error {
@@ -95,8 +95,8 @@ func (c *udpClient) Read(data []byte) (int, error) {
 		defer c.Conn.Close()
 		return 0, errors.New("closed")
 	}
-	if 2*c.timeout <= maxTimeout {
-		c.timeout = 2 * c.timeout
+	if c.timeout < maxTimeout {
+		c.timeout++
 	}
 	return n, err
 }
@@ -206,8 +206,8 @@ func (c *udpConn) Read(b []byte) (n int, err error) {
 	} else {
 		c.buff = c.buff[n:]
 	}
-	if 2*c.timeout <= maxTimeout {
-		c.timeout = 2 * c.timeout
+	if c.timeout < maxTimeout {
+		c.timeout++
 	}
 
 	return

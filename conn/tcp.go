@@ -34,13 +34,15 @@ func (c *TCPPool) Listen(addr string, handle func(libp2p.Conn)) error {
 			log.Println("fail to accept new connection", err)
 			return nil
 		}
+		u1, _ := url.Parse(addr)
+		u1.Host = conn.LocalAddr().String()
 		u2, _ := url.Parse(addr)
 		u2.Host = conn.RemoteAddr().String()
 		u2.User = nil
 		out := new(dfConn)
 		out.Conn = conn
 		out.peerAddr = newAddr(u2, false)
-		out.selfAddr = newAddr(u, true)
+		out.selfAddr = newAddr(u1, true)
 		go handle(out)
 	}
 }
