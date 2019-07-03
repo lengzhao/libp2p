@@ -61,6 +61,10 @@ func (m *Manager) Listen(address string) error {
 	if err != nil {
 		return err
 	}
+	if u.Hostname() == "" {
+		log.Println("warning. unknow ip of listen")
+	}
+
 	m.scheme = u.Scheme
 	id := hex.EncodeToString(m.cryp.GetPublic())
 	u.User = url.User(id)
@@ -102,6 +106,7 @@ func (m *Manager) NewSession(address string) (libp2p.Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	conn.LocalAddr().UpdateUser(hex.EncodeToString(m.cryp.GetPublic()))
 	s := newSession(m, conn, id, false)
 	stat.Add("NewSession", 1)
 	return s, nil

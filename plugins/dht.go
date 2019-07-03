@@ -5,7 +5,7 @@ import (
 	"encoding/gob"
 	"encoding/hex"
 	"expvar"
-	"log"
+	// "log"
 	"net/url"
 	"sync"
 	"time"
@@ -16,7 +16,6 @@ import (
 
 // Ping dht ping
 type Ping struct {
-	FromAddr string
 }
 
 // Pong dht pong
@@ -46,17 +45,17 @@ type DiscoveryPlugin struct {
 	*libp2p.Plugin
 	mu         sync.Mutex
 	self       []byte
-	dht        *dht.TDHT
+	discDht    *dht.TDHT // for dht discovery
 	conns      map[string]libp2p.Session
-	address    string
 	net        libp2p.Network
+	address    string
 	scheme     string
 	cmu        sync.Mutex
 	connecting map[string]int64
 }
 
 const (
-	envKey   = "inDHT"
+	envDHT   = "inDHT"
 	envValue = "true"
 )
 
@@ -83,9 +82,9 @@ func (d *DiscoveryPlugin) Startup(net libp2p.Network) {
 	}
 
 	d.self = node.PublicKey
-	d.dht = dht.CreateDHT(node)
-	d.conns = make(map[string]libp2p.Session)
 	d.address = node.Address
+	d.discDht = dht.CreateDHT(node)
+	d.conns = make(map[string]libp2p.Session)
 	d.net = net
 	d.scheme = u.Scheme
 	d.connecting = make(map[string]int64)
@@ -100,30 +99,12 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 	case Ping:
 		// log.Printf("Ping from <%s>\n", msg.FromAddr)
 		stat.Add("Ping", 1)
-		e.Reply(Pong{d.address, e.GetSession().GetSelfAddr().IsServer()})
-		peer := e.GetSession().GetPeerAddr()
-		if peer.IsServer() {
-			rst := d.addNode(peer.String())
-			if rst {
-				e.GetSession().SetEnv(envKey, envValue)
-				e.Reply(Find{d.self})
-			}
+		selfAddr := e.GetSession().GetSelfAddr()
+		if selfAddr.IsServer() {
+			e.Reply(Pong{selfAddr.String(), true})
 		} else {
-			u1, _ := url.Parse(peer.String())
-			u2, _ := url.Parse(msg.FromAddr)
-			if u1 == nil || u2 == nil {
-				return nil
-			}
-			if u1.Hostname() != u2.Hostname() {
-				return nil
-			}
-			rst := d.addNode(msg.FromAddr)
-			if rst {
-				e.GetSession().SetEnv(envKey, envValue)
-				e.Reply(Find{d.self})
-			}
+			e.Reply(Pong{d.address, false})
 		}
-
 	case Pong:
 		// log.Printf("Pong from <%s> %t, self:%s\n", msg.FromAddr, msg.IsServer, e.GetSession().GetSelfAddr())
 		stat.Add("Pong", 1)
@@ -132,20 +113,24 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		if peer.IsServer() || msg.IsServer {
 			rst := d.addNode(peer.String())
 			if rst {
-				e.GetSession().SetEnv(envKey, envValue)
+				e.GetSession().SetEnv(envDHT, envValue)
 			}
 		} else {
 			u1, _ := url.Parse(peer.String())
 			u2, _ := url.Parse(msg.FromAddr)
 			if u1 == nil || u2 == nil {
+				// log.Println("Pong error addr:", peer.String(), msg.FromAddr)
 				return nil
 			}
-			if u1.Hostname() != u2.Hostname() {
+			if u1.User.String() != u2.User.String() {
+				return nil
+			}
+			if u2.Hostname() == "" {
 				return nil
 			}
 			rst := d.addNode(msg.FromAddr)
 			if rst {
-				e.GetSession().SetEnv(envKey, envValue)
+				e.GetSession().SetEnv(envDHT, envValue)
 			}
 		}
 	case Find:
@@ -154,9 +139,9 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		peer := new(dht.NodeID)
 		peer.PublicKey = msg.Key
 		peer.Address = ""
-		nodes := d.dht.Find(peer)
+		nodes := d.discDht.Find(peer)
 		if len(nodes) == 0 {
-			log.Println("not any node")
+			// log.Println("not any node")
 			return nil
 		}
 		resp := new(Nodes)
@@ -174,7 +159,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			}
 			pu, err := url.Parse(addr)
 			if err != nil {
-				log.Println("fail to parse adddress:", addr, err)
+				// log.Println("fail to parse adddress:", addr, err)
 				continue
 			}
 			d.mu.Lock()
@@ -189,9 +174,9 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 				// log.Println("fail to new session:", addr, err)
 				continue
 			}
-			err = session.Send(Ping{d.address})
+			err = session.Send(Ping{})
 			if err != nil {
-				log.Println("fail to send ping:", addr, err)
+				// log.Println("fail to send ping:", addr, err)
 				continue
 			}
 			if pu.Scheme == d.scheme &&
@@ -236,7 +221,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			if session == nil {
 				return nil
 			}
-			session.Send(Ping{d.address})
+			session.Send(Ping{})
 			// log.Println("Traversal dst, send DhtPing to:", msg.FromAddr)
 		} else if bytes.Compare(fid, e.GetPeerID()) == 0 { //proxy
 			d.mu.Lock()
@@ -259,6 +244,13 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			}
 			session.Send(msg)
 		}
+	default:
+		session := e.GetSession()
+		if session.GetEnv(envDHT) == envValue {
+			// log.Println("session in dht")
+			return nil
+		}
+		session.Close()
 	}
 	return nil
 }
@@ -280,7 +272,7 @@ func (d *DiscoveryPlugin) addNode(address string) (bNew bool) {
 	node := new(dht.NodeID)
 	node.PublicKey = id
 	node.Address = address
-	bNew = d.dht.Add(node)
+	bNew = d.discDht.Add(node)
 	// if bNew {
 	// 	log.Println("dht add address:", address)
 	// }
@@ -290,8 +282,7 @@ func (d *DiscoveryPlugin) addNode(address string) (bNew bool) {
 // PeerConnect is called every time a PeerSession is initialized and connected
 func (d *DiscoveryPlugin) PeerConnect(s libp2p.Session) {
 	un := s.GetPeerAddr().User()
-	go s.Send(Ping{d.address})
-	// log.Println("new peer:", un, len(d.conns))
+	go s.Send(Ping{})
 	d.cmu.Lock()
 	delete(d.connecting, un)
 	d.cmu.Unlock()
@@ -319,7 +310,7 @@ func (d *DiscoveryPlugin) PeerDisconnect(s libp2p.Session) {
 	// log.Println("peer leave:", un, len(d.conns))
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.dht.RemoveNode(&node)
+	d.discDht.RemoveNode(&node)
 	delete(d.conns, un)
 }
 

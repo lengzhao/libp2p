@@ -98,8 +98,8 @@ func (c *S2SPool) Listen(addr string, handle func(libp2p.Conn)) error {
 				go handle(conn)
 			}
 			conn.cache(data[:n])
-			if 2*conn.timeout < maxTimeout {
-				conn.timeout = 2 * conn.timeout
+			if conn.timeout < maxTimeout {
+				conn.timeout++
 			}
 		}
 	}
