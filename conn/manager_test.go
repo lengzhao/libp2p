@@ -120,7 +120,7 @@ func runCloseByClient(addr1, addr2 string) error {
 	s1.Close()
 	serData = <-h.Data
 	if serData != nil {
-		return errors.New("fail to close connection,"+string(serData))
+		return errors.New("fail to close connection," + string(serData))
 	}
 
 	return nil

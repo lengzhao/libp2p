@@ -5,7 +5,6 @@ import (
 	"encoding/gob"
 	"encoding/hex"
 	"expvar"
-	// "log"
 	"net/url"
 	"sync"
 	"time"
@@ -75,11 +74,7 @@ func (d *DiscoveryPlugin) Startup(net libp2p.Network) {
 	node.Address = net.GetAddress()
 	u, _ := url.Parse(node.Address)
 	un := u.User.Username()
-	if len(un) <= 32 {
-		node.PublicKey = []byte(un)
-	} else {
-		node.PublicKey, _ = hex.DecodeString(un)
-	}
+	node.PublicKey, _ = hex.DecodeString(un)
 
 	d.self = node.PublicKey
 	d.address = node.Address
@@ -97,7 +92,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 	stat.Add("event", 1)
 	switch msg := e.GetMessage().(type) {
 	case Ping:
-		// log.Printf("Ping from <%s>\n", msg.FromAddr)
+		// log.Printf("Ping from <%x>\n", e.GetPeerID())
 		stat.Add("Ping", 1)
 		selfAddr := e.GetSession().GetSelfAddr()
 		if selfAddr.IsServer() {

@@ -56,7 +56,11 @@ func (mgr *PoolMgr) Listen(addr string, handle func(libp2p.Conn)) error {
 	}
 	mgr.handle = handle
 	mgr.listener = pool
-	return pool.Listen(addr, mgr.process)
+	err = pool.Listen(addr, mgr.process)
+	if err != nil {
+		log.Println("fail to listen address:", addr, err)
+	}
+	return err
 }
 
 // Dial dial,the address must be with scheme,such as:"tcp://user_id@127.0.0.1:1111"

@@ -43,6 +43,9 @@ func (state *ChatPlugin) Receive(e libp2p.Event) error {
 	switch info := e.GetMessage().(type) {
 	case Message:
 		log.Printf("Info <%s> %d %s \n", e.GetSession().GetPeerAddr(), len(info.Data), info.Data)
+		if info.Data == "request" {
+			e.Reply(Message{Data: "response"})
+		}
 	}
 
 	return nil
