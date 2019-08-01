@@ -80,9 +80,6 @@ func (c *S2SPool) Listen(addr string, handle func(libp2p.Conn)) error {
 			}
 		case connOpsKeepalive:
 			if ok {
-				if conn.timeout < maxTimeout {
-					conn.timeout += time.Second
-				}
 				conn.rto.Reset(conn.timeout)
 			}
 		case connOpsData:
@@ -101,9 +98,7 @@ func (c *S2SPool) Listen(addr string, handle func(libp2p.Conn)) error {
 				go handle(conn)
 			}
 			conn.cache(data[:n])
-			if conn.timeout < maxTimeout {
-				conn.timeout += time.Second
-			}
+			conn.rto.Reset(conn.timeout)
 		}
 	}
 }
@@ -126,7 +121,7 @@ func (c *S2SPool) Dial(addr string) (libp2p.Conn, error) {
 		out := new(udpClient)
 		out.Conn = conn
 		out.peerAddr = newAddr(u, true)
-		out.timeout = 10 * time.Second
+		out.timeout = defaultTimeout
 		u2, _ := url.Parse(addr)
 		u2.Host = conn.LocalAddr().String()
 		u2.User = nil
@@ -192,7 +187,7 @@ func newS2SConn(p *S2SPool, paddr *dfAddr, udpAddr net.Addr) *s2sConn {
 	out.selfAddr = p.address
 	out.peerAddr = paddr
 	out.peer = udpAddr
-	out.timeout = 10 * time.Second
+	out.timeout = defaultTimeout
 	out.rto = time.NewTimer(out.timeout)
 	out.wto = time.NewTimer(out.timeout / 3)
 	out.die = make(chan bool)
