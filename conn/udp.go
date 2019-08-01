@@ -96,7 +96,7 @@ func (c *udpClient) Read(data []byte) (int, error) {
 		return 0, errors.New("closed")
 	}
 	if c.timeout < maxTimeout {
-		c.timeout++
+		c.timeout += time.Second
 	}
 	return n, err
 }
@@ -207,7 +207,7 @@ func (c *udpConn) Read(b []byte) (n int, err error) {
 		c.buff = c.buff[n:]
 	}
 	if c.timeout < maxTimeout {
-		c.timeout++
+		c.timeout += time.Second
 	}
 
 	return

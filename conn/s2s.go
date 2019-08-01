@@ -80,6 +80,9 @@ func (c *S2SPool) Listen(addr string, handle func(libp2p.Conn)) error {
 			}
 		case connOpsKeepalive:
 			if ok {
+				if conn.timeout < maxTimeout {
+					conn.timeout += time.Second
+				}
 				conn.rto.Reset(conn.timeout)
 			}
 		case connOpsData:
@@ -99,7 +102,7 @@ func (c *S2SPool) Listen(addr string, handle func(libp2p.Conn)) error {
 			}
 			conn.cache(data[:n])
 			if conn.timeout < maxTimeout {
-				conn.timeout++
+				conn.timeout += time.Second
 			}
 		}
 	}
@@ -169,7 +172,6 @@ func (c *S2SPool) removeConn(addr string) {
 
 type s2sConn struct {
 	mu     sync.Mutex
-	active bool
 	conn   *S2SPool
 	buff   []byte
 	cached chan []byte
@@ -190,7 +192,6 @@ func newS2SConn(p *S2SPool, paddr *dfAddr, udpAddr net.Addr) *s2sConn {
 	out.selfAddr = p.address
 	out.peerAddr = paddr
 	out.peer = udpAddr
-	out.active = true
 	out.timeout = 10 * time.Second
 	out.rto = time.NewTimer(out.timeout)
 	out.wto = time.NewTimer(out.timeout / 3)
@@ -263,7 +264,6 @@ func (c *s2sConn) Write(b []byte) (n int, err error) {
 // Close closes the connection.
 // Any blocked Read or Write operations will be unblocked and return errors.
 func (c *s2sConn) Close() error {
-	c.active = false
 	select {
 	case <-c.die:
 	default:
