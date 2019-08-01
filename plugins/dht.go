@@ -51,6 +51,7 @@ type DiscoveryPlugin struct {
 	scheme     string
 	cmu        sync.Mutex
 	connecting map[string]int64
+	findTime   int64
 }
 
 const (
@@ -148,6 +149,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		e.Reply(resp)
 	case Nodes:
 		stat.Add("Nodes", 1)
+		d.findTime = time.Now().Unix()
 		for i, addr := range msg.Addresses {
 			if i > dht.BucketSize {
 				break
@@ -307,6 +309,12 @@ func (d *DiscoveryPlugin) PeerDisconnect(s libp2p.Session) {
 	defer d.mu.Unlock()
 	d.discDht.RemoveNode(&node)
 	delete(d.conns, un)
+	if len(d.conns) < 5 || d.findTime+1000 < time.Now().Unix() {
+		for _, conn := range d.conns {
+			conn.Send(Find{d.self})
+			break
+		}
+	}
 }
 
 func (d *DiscoveryPlugin) newConn(addr string) libp2p.Session {
