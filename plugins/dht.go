@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"encoding/hex"
 	"expvar"
+	"fmt"
 	"net/url"
 	"sync"
 	"time"
@@ -55,8 +56,9 @@ type DiscoveryPlugin struct {
 }
 
 const (
-	envDHT   = "inDHT"
-	envValue = "true"
+	envDHT      = "inDHT"
+	envValue    = "true"
+	envProtTime = "protectTime"
 )
 
 var stat = expvar.NewMap("dht")
@@ -99,6 +101,11 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		if selfAddr.IsServer() {
 			e.Reply(Pong{selfAddr.String(), true})
 		} else {
+			peer := e.GetSession().GetPeerAddr()
+			rst := d.addNode(peer.String())
+			if rst {
+				e.GetSession().SetEnv(envDHT, envValue)
+			}
 			e.Reply(Pong{d.address, false})
 		}
 	case Pong:
@@ -247,6 +254,16 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			// log.Println("session in dht")
 			return nil
 		}
+		t := fmt.Sprintf("%d", time.Now().Unix())
+		pt := session.GetEnv(envProtTime)
+		if t <= pt {
+			return nil
+		}
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		if len(d.conns) < 20 {
+			return nil
+		}
 		session.Close()
 	}
 	return nil
@@ -278,6 +295,8 @@ func (d *DiscoveryPlugin) addNode(address string) (bNew bool) {
 
 // PeerConnect is called every time a PeerSession is initialized and connected
 func (d *DiscoveryPlugin) PeerConnect(s libp2p.Session) {
+	t := fmt.Sprintf("%d", time.Now().Add(5*time.Second).Unix())
+	s.SetEnv(envProtTime, t)
 	un := s.GetPeerAddr().User()
 	go s.Send(Ping{})
 	d.cmu.Lock()
