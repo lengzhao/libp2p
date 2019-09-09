@@ -28,6 +28,7 @@ func (c *TCPPool) Listen(addr string, handle func(libp2p.Conn)) error {
 	}
 	u.Host = c.l.Addr().String()
 	c.addr = newAddr(u, true)
+	log.Println("listen:", c.addr.String())
 	for {
 		conn, err := c.l.Accept()
 		if err != nil {
