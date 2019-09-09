@@ -3,6 +3,7 @@ package conn
 import (
 	"bytes"
 	"errors"
+	"log"
 	"net"
 	"net/url"
 	"sync"
@@ -43,6 +44,7 @@ func (c *UDPPool) Listen(addr string, handle func(libp2p.Conn)) error {
 	c.address = newAddr(u, true)
 	c.active = true
 	c.conns = make(map[string]*udpConn)
+	log.Println("listen:", c.address.String())
 	for {
 		data := make([]byte, 1500)
 		n, peer, err := c.server.ReadFrom(data)

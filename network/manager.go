@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/url"
 	"runtime/debug"
+	"strings"
 	"sync"
 
 	"github.com/lengzhao/libp2p"
@@ -52,31 +53,40 @@ func (m *Manager) GetAddress() string {
 	return m.address
 }
 
-// Listen listen
+// Listen listen, support multi Listen, address split with ','
 func (m *Manager) Listen(address string) error {
 	if m.active {
 		return errors.New("error status,it is active")
 	}
-	u, err := url.Parse(address)
-	if err != nil {
-		return err
-	}
-	if u.Hostname() == "" {
-		log.Println("warning. unknow ip of listen")
-	}
-
-	m.scheme = u.Scheme
 	id := hex.EncodeToString(m.cryp.GetPublic())
-	u.User = url.User(id)
-	m.address = u.String()
-	m.active = true
+	addrs := strings.Split(address, ",")
+	for i, addr := range addrs {
+		log.Printf("address. index:%d, addr:%s\n", i, addr)
+		u, err := url.Parse(addr)
+		if err != nil {
+			log.Println("fail to parse address:", addr)
+			continue
+		}
+		if u.Hostname() == "" {
+			log.Println("warning. unknow ip of listen")
+		}
+		u.User = url.User(id)
 
-	for _, plugin := range m.plugins {
-		plugin.Startup(m)
-		defer plugin.Cleanup(m)
+		if m.active {
+			go m.connPool.Listen(u.String(), m.process)
+			continue
+		}
+
+		m.scheme = u.Scheme
+		m.address = u.String()
+		m.active = true
+
+		for _, plugin := range m.plugins {
+			plugin.Startup(m)
+			defer plugin.Cleanup(m)
+		}
 	}
-
-	log.Println("listen address:", m.address)
+	// log.Println("listen address:", m.address)
 	return m.connPool.Listen(m.address, m.process)
 }
 

@@ -56,7 +56,7 @@ func (state *ChatPlugin) Receive(e libp2p.Event) error {
 //the peer address is the listen address of first node
 func main() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
-	address := flag.String("addr", "tcp://127.0.0.1:3003", "listen address")
+	address := flag.String("addr", "tcp://127.0.0.1:3003,s2s://:0", "listen address")
 	peer := flag.String("peer", "tcp://47ed0566bff0@127.0.0.1:3000", "peer address")
 
 	flag.Parse()

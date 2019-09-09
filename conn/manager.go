@@ -74,7 +74,7 @@ func (mgr *PoolMgr) Dial(addr string) (libp2p.Conn, error) {
 		return nil, errors.New("user=nil")
 	}
 
-	if u.Port() == "0" {
+	if u.Port() == "0" || u.Port() == "" {
 		return nil, errors.New("error port")
 	}
 

@@ -29,6 +29,7 @@ func (c *WSPool) Listen(addr string, handle func(libp2p.Conn)) error {
 	c.server = &http.Server{Addr: u.Host, Handler: hander}
 	c.cb = handle
 	c.addr = newAddr(u, true)
+	log.Println("listen:", c.addr.String())
 	return c.server.ListenAndServe()
 }
 
