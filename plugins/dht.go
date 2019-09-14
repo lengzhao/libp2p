@@ -16,6 +16,7 @@ import (
 
 // Ping dht ping
 type Ping struct {
+	IsServer bool
 }
 
 // Pong dht pong
@@ -56,9 +57,10 @@ type DiscoveryPlugin struct {
 }
 
 const (
-	envDHT      = "inDHT"
-	envValue    = "true"
-	envProtTime = "protectTime"
+	envDHT        = "inDHT"
+	envValue      = "true"
+	envProtTime   = "protectTime"
+	envServerAddr = "address"
 )
 
 var stat = expvar.NewMap("dht")
@@ -97,11 +99,16 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 	case Ping:
 		// log.Printf("Ping from <%x>\n", e.GetPeerID())
 		stat.Add("Ping", 1)
+		peer := e.GetSession().GetPeerAddr()
+		if msg.IsServer {
+			peer.SetServer()
+			e.GetSession().SetEnv(envServerAddr, peer.String())
+		}
 		selfAddr := e.GetSession().GetSelfAddr()
 		if selfAddr.IsServer() {
 			e.Reply(Pong{selfAddr.String(), true})
 		} else {
-			peer := e.GetSession().GetPeerAddr()
+			peer.SetServer()
 			rst := d.addNode(peer.String())
 			if rst {
 				e.GetSession().SetEnv(envDHT, envValue)
@@ -114,6 +121,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		e.Reply(Find{d.self})
 		peer := e.GetSession().GetPeerAddr()
 		if peer.IsServer() || msg.IsServer {
+			peer.SetServer()
 			rst := d.addNode(peer.String())
 			if rst {
 				e.GetSession().SetEnv(envDHT, envValue)
