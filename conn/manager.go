@@ -150,3 +150,7 @@ func (a *dfAddr) UpdateUser(user string) {
 		a.addr.User = url.User(user)
 	}
 }
+
+func (a *dfAddr) SetServer() {
+	a.isServer = true
+}

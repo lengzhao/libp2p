@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"errors"
 	"github.com/lengzhao/libp2p"
 	"sync"
 )
@@ -42,6 +43,9 @@ func (b *Broadcast) RandSend(msg interface{}) error {
 		break
 	}
 	b.mu.Unlock()
+	if conn == nil {
+		return errors.New("not exist any connection")
+	}
 	return conn.Send(msg)
 }
 
