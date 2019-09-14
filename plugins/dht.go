@@ -122,6 +122,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		peer := e.GetSession().GetPeerAddr()
 		if peer.IsServer() || msg.IsServer {
 			peer.SetServer()
+			e.GetSession().SetEnv(envServerAddr, peer.String())
 			rst := d.addNode(peer.String())
 			if rst {
 				e.GetSession().SetEnv(envDHT, envValue)
@@ -142,6 +143,9 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			rst := d.addNode(msg.FromAddr)
 			if rst {
 				e.GetSession().SetEnv(envDHT, envValue)
+			}
+			if len(msg.FromAddr) < 100 {
+				e.GetSession().SetEnv(envServerAddr, msg.FromAddr)
 			}
 		}
 	case Find:
