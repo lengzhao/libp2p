@@ -190,7 +190,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 				// log.Println("fail to new session:", addr, err)
 				continue
 			}
-			err = session.Send(Ping{})
+			err = session.Send(Ping{IsServer: session.GetSelfAddr().IsServer()})
 			if err != nil {
 				// log.Println("fail to send ping:", addr, err)
 				continue
@@ -237,7 +237,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			if session == nil {
 				return nil
 			}
-			session.Send(Ping{})
+			session.Send(Ping{IsServer: session.GetSelfAddr().IsServer()})
 			// log.Println("Traversal dst, send DhtPing to:", msg.FromAddr)
 		} else if bytes.Compare(fid, e.GetPeerID()) == 0 { //proxy
 			d.mu.Lock()
@@ -310,7 +310,7 @@ func (d *DiscoveryPlugin) PeerConnect(s libp2p.Session) {
 	t := fmt.Sprintf("%d", time.Now().Add(5*time.Second).Unix())
 	s.SetEnv(envProtTime, t)
 	un := s.GetPeerAddr().User()
-	go s.Send(Ping{})
+	go s.Send(Ping{IsServer: s.GetSelfAddr().IsServer()})
 	d.cmu.Lock()
 	delete(d.connecting, un)
 	d.cmu.Unlock()
