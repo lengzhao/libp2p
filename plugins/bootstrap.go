@@ -28,7 +28,7 @@ func (d *Bootstrap) Startup(net libp2p.Network) {
 			if err != nil {
 				continue
 			}
-			s.Send(Ping{})
+			s.Send(Ping{IsServer: s.GetSelfAddr().IsServer()})
 		}
 	}()
 }
