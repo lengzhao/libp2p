@@ -147,8 +147,6 @@ type udpConn struct {
 	peer     net.Addr
 	selfAddr libp2p.Addr
 	peerAddr libp2p.Addr
-	timeout  time.Duration
-	to       *time.Timer
 	die      chan bool
 }
 
@@ -158,8 +156,6 @@ func newUDPConn(p *UDPPool, addr net.Addr) *udpConn {
 	out.conn = p
 	out.peer = addr
 	out.active = true
-	out.timeout = defaultTimeout
-	out.to = time.NewTimer(out.timeout)
 	out.die = make(chan bool)
 	out.selfAddr = p.address
 	pa := new(url.URL)
@@ -183,13 +179,13 @@ func (c *udpConn) cache(data []byte) {
 func (c *udpConn) Read(b []byte) (n int, err error) {
 	//log.Println("start to read:", len(b), c.LocalAddr().String())
 	if c.buff == nil {
-		c.to.Reset(c.timeout)
-		defer c.to.Stop()
+		to := make(chan int, 1)
+		time.AfterFunc(defaultTimeout, func() { to <- 1 })
 		select {
 		case <-c.die:
 		case c.buff = <-c.cached:
 			// log.Println("read data:", c.LocalAddr().String())
-		case <-c.to.C:
+		case <-to:
 			// log.Println("read timeout:", c.LocalAddr().String())
 			return 0, errors.New("read timeout")
 		}
@@ -227,7 +223,6 @@ func (c *udpConn) Close() error {
 		close(c.die)
 		c.Write(closeData)
 		// log.Println("close udpConn:", c.peer.String())
-		c.to.Stop()
 		c.conn.removeConn(c.peer.String())
 	}
 

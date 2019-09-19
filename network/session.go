@@ -40,6 +40,7 @@ func newSession(m *Manager, conn libp2p.Conn, peer []byte, sync bool) *Session {
 	out.peerID = peer
 
 	if len(peer) > 0 {
+		conn.RemoteAddr().UpdateUser(hex.EncodeToString(peer))
 		for _, p := range m.plugins {
 			p.PeerConnect(out)
 		}

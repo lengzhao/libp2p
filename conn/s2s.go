@@ -80,7 +80,7 @@ func (c *S2SPool) Listen(addr string, handle func(libp2p.Conn)) error {
 			}
 		case connOpsKeepalive:
 			if ok {
-				conn.rto.Reset(conn.timeout)
+				conn.rcount = 0
 			}
 		case connOpsData:
 			if !ok {
@@ -97,8 +97,8 @@ func (c *S2SPool) Listen(addr string, handle func(libp2p.Conn)) error {
 				}
 				go handle(conn)
 			}
+			conn.rcount = 0
 			conn.cache(data[:n])
-			conn.rto.Reset(conn.timeout)
 		}
 	}
 }
@@ -174,9 +174,7 @@ type s2sConn struct {
 	peer     net.Addr
 	selfAddr *dfAddr
 	peerAddr *dfAddr
-	timeout  time.Duration
-	rto      *time.Timer
-	wto      *time.Timer
+	rcount   int
 	die      chan bool
 }
 
@@ -187,11 +185,8 @@ func newS2SConn(p *S2SPool, paddr *dfAddr, udpAddr net.Addr) *s2sConn {
 	out.selfAddr = p.address
 	out.peerAddr = paddr
 	out.peer = udpAddr
-	out.timeout = defaultTimeout
-	out.rto = time.NewTimer(out.timeout)
-	out.wto = time.NewTimer(out.timeout / 3)
 	out.die = make(chan bool)
-	go out.keepalive()
+	time.AfterFunc(defaultTimeout/3, out.timeout)
 	return out
 }
 
@@ -203,34 +198,30 @@ func (c *s2sConn) cache(data []byte) {
 	}
 }
 
-func (c *s2sConn) keepalive() {
-	for {
-		c.wto.Reset(c.timeout / 3)
-		defer c.wto.Stop()
-		select {
-		case <-c.die:
-			return
-		case <-c.wto.C:
-			c.Write(keepaliveData)
-		}
+func (c *s2sConn) timeout() {
+	select {
+	case <-c.die:
+		return
+	default:
+		c.Write(keepaliveData)
 	}
+	if c.rcount > 3 {
+		c.Close()
+		return
+	}
+	c.rcount++
+	time.AfterFunc(defaultTimeout/3, c.timeout)
 }
 
 // Read reads data from the connection.
 // Read can be made to time out and return an Error with Timeout() == true
 // after a fixed time limit; see SetDeadline and SetReadDeadline.
 func (c *s2sConn) Read(b []byte) (n int, err error) {
-	//log.Println("start to read:", len(b), c.LocalAddr().String())
+	// log.Println("start to read:", len(b), c.LocalAddr().String())
 	if c.buff == nil {
-		c.rto.Reset(c.timeout)
-		defer c.rto.Stop()
 		select {
 		case <-c.die:
 		case c.buff = <-c.cached:
-			// log.Println("read data:", c.LocalAddr().String())
-		case <-c.rto.C:
-			// log.Println("read timeout:", c.LocalAddr().String())
-			return 0, errors.New("read timeout")
 		}
 	}
 	if c.buff == nil {
@@ -252,7 +243,6 @@ func (c *s2sConn) Read(b []byte) (n int, err error) {
 // Write can be made to time out and return an Error with Timeout() == true
 // after a fixed time limit; see SetDeadline and SetWriteDeadline.
 func (c *s2sConn) Write(b []byte) (n int, err error) {
-	c.wto.Reset(c.timeout / 3)
 	return c.conn.server.WriteTo(b, c.peer)
 }
 
@@ -264,8 +254,6 @@ func (c *s2sConn) Close() error {
 	default:
 		close(c.die)
 		c.Write(closeData)
-		c.rto.Stop()
-		c.wto.Stop()
 		go c.conn.removeConn(c.peer.String())
 	}
 
