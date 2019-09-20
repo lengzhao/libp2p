@@ -20,7 +20,6 @@ type Session struct {
 	scheme   string
 	id       int
 	mu       sync.Mutex
-	wMu      sync.Mutex
 	peerAddr string
 	peerID   []byte
 	selfID   []byte
@@ -149,8 +148,6 @@ func (s *Session) Send(msg interface{}) error {
 		return errors.New("data too long")
 	}
 	sign := s.mgr.cryp.Sign(data)
-	s.wMu.Lock()
-	defer s.wMu.Unlock()
 	var head dataHeader
 	head.Magic = magic
 	head.Len = uint16(len(data) + len(sign) + 1)
