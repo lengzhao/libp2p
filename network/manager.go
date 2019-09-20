@@ -149,8 +149,12 @@ func (m *Manager) SendInternalMsg(msg libp2p.InterMsg) {
 			}
 		}()
 		m.mu.Lock()
-		defer m.mu.Unlock()
-		for _, p := range m.plugins {
+		ps := make([]libp2p.IPlugin,len(m.plugins))
+		for i,p := range m.plugins{
+			ps[i]=p
+		}
+		m.mu.Unlock()
+		for _, p := range ps {
 			p.RecInternalMsg(msg)
 		}
 	}()

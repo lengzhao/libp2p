@@ -55,6 +55,7 @@ func (b *Broadcast) RandSend(msg interface{}) error {
 	}
 	b.mu.Lock()
 	if len(b.conns) == 0 {
+		b.mu.Unlock()
 		return errors.New("not exist any connection")
 	}
 	index := r % len(b.conns)
@@ -88,8 +89,8 @@ func (b *Broadcast) PeerConnect(s libp2p.Session) {
 func (b *Broadcast) PeerDisconnect(s libp2p.Session) {
 	key := s.GetEnv(libp2p.EnvConnectID)
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	delete(b.conns, key)
+	b.mu.Unlock()
 }
 
 // RecInternalMsg internal msg
