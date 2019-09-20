@@ -48,6 +48,7 @@ type DiscoveryPlugin struct {
 	self       []byte
 	discDht    *dht.TDHT // for dht discovery
 	conns      map[string]libp2p.Session
+	users      map[string][maxConnPreUser]string
 	net        libp2p.Network
 	address    string
 	scheme     string
@@ -57,10 +58,11 @@ type DiscoveryPlugin struct {
 }
 
 const (
-	envDHT        = "inDHT"
-	envValue      = "true"
-	envProtTime   = "protectTime"
-	envServerAddr = "address"
+	envDHT         = "inDHT"
+	envValue       = "true"
+	envProtTime    = "protectTime"
+	envServerAddr  = "address"
+	maxConnPreUser = 5
 )
 
 var stat = expvar.NewMap("dht")
@@ -85,6 +87,7 @@ func (d *DiscoveryPlugin) Startup(net libp2p.Network) {
 	d.address = node.Address
 	d.discDht = dht.CreateDHT(node)
 	d.conns = make(map[string]libp2p.Session)
+	d.users = make(map[string][maxConnPreUser]string)
 	d.net = net
 	d.scheme = u.Scheme
 	d.connecting = make(map[string]int64)
@@ -178,12 +181,9 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 				// log.Println("fail to parse adddress:", addr, err)
 				continue
 			}
-			d.mu.Lock()
-			if d.conns[pu.User.Username()] != nil {
-				d.mu.Unlock()
+			if d.getConnByUID(pu.User.Username()) != nil {
 				continue
 			}
-			d.mu.Unlock()
 
 			session := d.newConn(addr)
 			if session == nil {
@@ -227,12 +227,9 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		}
 		// dst
 		if bytes.Compare(tid, d.self) == 0 {
-			d.mu.Lock()
-			if d.conns[fu.User.Username()] != nil {
-				d.mu.Unlock()
+			if d.getConnByUID(fu.User.Username()) != nil {
 				return nil
 			}
-			d.mu.Unlock()
 			session := d.newConn(msg.FromAddr)
 			if session == nil {
 				return nil
@@ -240,13 +237,11 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			session.Send(Ping{IsServer: session.GetSelfAddr().IsServer()})
 			// log.Println("Traversal dst, send DhtPing to:", msg.FromAddr)
 		} else if bytes.Compare(fid, e.GetPeerID()) == 0 { //proxy
-			d.mu.Lock()
-			if d.conns[fu.User.Username()] == nil {
-				d.mu.Unlock()
+			var session libp2p.Session
+			if d.getConnByUID(fu.User.Username()) == nil {
 				return nil
 			}
-			session := d.conns[tu.User.Username()]
-			d.mu.Unlock()
+			session = d.getConnByUID(tu.User.Username())
 			if session == nil {
 				return nil
 			}
@@ -310,6 +305,7 @@ func (d *DiscoveryPlugin) addNode(address string) (bNew bool) {
 func (d *DiscoveryPlugin) PeerConnect(s libp2p.Session) {
 	t := fmt.Sprintf("%d", time.Now().Add(5*time.Second).Unix())
 	s.SetEnv(envProtTime, t)
+	cid := s.GetEnv(libp2p.EnvConnectID)
 	un := s.GetPeerAddr().User()
 	go s.Send(Ping{IsServer: s.GetSelfAddr().IsServer()})
 	d.cmu.Lock()
@@ -317,30 +313,59 @@ func (d *DiscoveryPlugin) PeerConnect(s libp2p.Session) {
 	d.cmu.Unlock()
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.conns[un] = s
+	d.conns[cid] = s
+	ids := d.users[un]
+	for i, id := range ids {
+		if id == "" {
+			ids[i] = cid
+			d.users[un] = ids
+			break
+		}
+	}
 }
 
 // PeerDisconnect is called every time a PeerSession connection is closed
 func (d *DiscoveryPlugin) PeerDisconnect(s libp2p.Session) {
-	node := dht.NodeID{}
+	cid := s.GetEnv(libp2p.EnvConnectID)
 	un := s.GetPeerAddr().User()
-	if un == "" {
-		return
-	}
-	if len(un) <= 32 {
-		node.PublicKey = []byte(un)
-	} else {
-		node.PublicKey, _ = hex.DecodeString(un)
-	}
-	if len(node.PublicKey) == 0 {
-		return
-	}
-	node.Address = s.GetPeerAddr().String()
-	// log.Println("peer leave:", un, len(d.conns))
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.discDht.RemoveNode(&node)
-	delete(d.conns, un)
+	if s.GetEnv(envDHT) == envValue {
+		node := dht.NodeID{}
+		node.PublicKey, _ = hex.DecodeString(un)
+		d.discDht.RemoveNode(&node)
+	}
+
+	delete(d.conns, cid)
+	ids := d.users[un]
+	for i, id := range ids {
+		if id != cid {
+			continue
+		}
+		ids[i] = ""
+		if ids == [maxConnPreUser]string{} {
+			delete(d.users, un)
+		}
+	}
+}
+
+func (d *DiscoveryPlugin) getConnByUID(user string) libp2p.Session {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ids := d.users[user]
+	for i, id := range ids {
+		if id == "" {
+			continue
+		}
+		s := d.conns[id]
+		if s == nil {
+			ids[i] = ""
+			d.users[user] = ids
+			return nil
+		}
+		return s
+	}
+	return nil
 }
 
 func (d *DiscoveryPlugin) newConn(addr string) libp2p.Session {
@@ -352,10 +377,7 @@ func (d *DiscoveryPlugin) newConn(addr string) libp2p.Session {
 	if user == "" {
 		return nil
 	}
-	var conn libp2p.Session
-	d.mu.Lock()
-	conn = d.conns[user]
-	d.mu.Unlock()
+	conn := d.getConnByUID(user)
 	if conn != nil {
 		return conn
 	}
