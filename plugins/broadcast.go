@@ -3,6 +3,7 @@ package plugins
 import (
 	"errors"
 	"github.com/lengzhao/libp2p"
+	"math/rand"
 	"sync"
 )
 
@@ -27,9 +28,16 @@ func NewBroadcast(limit int) *Broadcast {
 
 // Broadcast Broadcast message
 func (b *Broadcast) Broadcast(msg interface{}) {
+	var lst []libp2p.Session
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	lst = make([]libp2p.Session, len(b.conns))
+	var i int
 	for _, conn := range b.conns {
+		lst[i] = conn
+		i++
+	}
+	b.mu.Unlock()
+	for _, conn := range lst {
 		conn.Send(msg)
 	}
 }
@@ -37,8 +45,20 @@ func (b *Broadcast) Broadcast(msg interface{}) {
 // RandSend send message to one connection
 func (b *Broadcast) RandSend(msg interface{}) error {
 	var conn libp2p.Session
+	r := rand.Int()
+	if r < 0 {
+		r = 0 - r
+	}
 	b.mu.Lock()
+	if len(b.conns) == 0 {
+		return errors.New("not exist any connection")
+	}
+	index := r % len(b.conns)
 	for _, c := range b.conns {
+		if index > 0 {
+			index--
+			continue
+		}
 		conn = c
 		break
 	}
@@ -54,7 +74,7 @@ func (b *Broadcast) PeerConnect(s libp2p.Session) {
 	if b.limit <= len(b.conns) {
 		return
 	}
-	key := s.GetPeerAddr().Host()
+	key := s.GetPeerAddr().User()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.conns[key] = s
@@ -62,7 +82,7 @@ func (b *Broadcast) PeerConnect(s libp2p.Session) {
 
 // PeerDisconnect is called every time a Session connection is closed
 func (b *Broadcast) PeerDisconnect(s libp2p.Session) {
-	key := s.GetPeerAddr().Host()
+	key := s.GetPeerAddr().User()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.conns, key)

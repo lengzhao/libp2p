@@ -272,10 +272,11 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			return nil
 		}
 		d.mu.Lock()
-		defer d.mu.Unlock()
 		if len(d.conns) < 20 {
+			d.mu.Unlock()
 			return nil
 		}
+		d.mu.Unlock()
 		session.Close()
 	}
 	return nil
@@ -340,12 +341,6 @@ func (d *DiscoveryPlugin) PeerDisconnect(s libp2p.Session) {
 	defer d.mu.Unlock()
 	d.discDht.RemoveNode(&node)
 	delete(d.conns, un)
-	if len(d.conns) < 5 || d.findTime+1000 < time.Now().Unix() {
-		for _, conn := range d.conns {
-			conn.Send(Find{d.self})
-			break
-		}
-	}
 }
 
 func (d *DiscoveryPlugin) newConn(addr string) libp2p.Session {
