@@ -328,13 +328,13 @@ func (d *DiscoveryPlugin) PeerConnect(s libp2p.Session) {
 func (d *DiscoveryPlugin) PeerDisconnect(s libp2p.Session) {
 	cid := s.GetEnv(libp2p.EnvConnectID)
 	un := s.GetPeerAddr().User()
-	d.mu.Lock()
-	defer d.mu.Unlock()
 	if s.GetEnv(envDHT) == envValue {
 		node := dht.NodeID{}
 		node.PublicKey, _ = hex.DecodeString(un)
 		d.discDht.RemoveNode(&node)
 	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
 
 	delete(d.conns, cid)
 	ids := d.users[un]
