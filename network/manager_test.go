@@ -160,7 +160,7 @@ func runTest2(addrs ...string) error {
 		p := new(ConnCount)
 		m.RegistPlugin(p)
 		m.RegistPlugin(new(plugins.DiscoveryPlugin))
-		m.RegistPlugin(plugins.NewBroadcast(0))
+		m.RegistPlugin(new(plugins.Broadcast))
 		go m.Listen(addr)
 		for !m.active {
 			time.Sleep(time.Millisecond * 10)

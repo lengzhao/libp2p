@@ -12,23 +12,21 @@ type Broadcast struct {
 	*libp2p.Plugin
 	mu    sync.Mutex
 	conns map[string]libp2p.Session
-	limit int
+	Limit int
 }
 
-// NewBroadcast new
-func NewBroadcast(limit int) *Broadcast {
-	out := new(Broadcast)
-	out.conns = make(map[string]libp2p.Session)
-	out.limit = 3000
-	if limit > 0 {
-		out.limit = limit
+// Startup Startup
+func (b *Broadcast) Startup(net libp2p.Network) {
+	b.conns = make(map[string]libp2p.Session)
+	if b.Limit == 0 {
+		b.Limit = 3000
 	}
-	return out
 }
 
 // Broadcast Broadcast message
 func (b *Broadcast) Broadcast(msg interface{}) {
 	var lst []libp2p.Session
+	peers := make(map[string]bool)
 	b.mu.Lock()
 	lst = make([]libp2p.Session, len(b.conns))
 	var i int
@@ -37,7 +35,13 @@ func (b *Broadcast) Broadcast(msg interface{}) {
 		i++
 	}
 	b.mu.Unlock()
+
 	for _, conn := range lst {
+		u := conn.GetPeerAddr().User()
+		if peers[u] {
+			continue
+		}
+		peers[u] = true
 		conn.Send(msg)
 	}
 }
@@ -71,10 +75,10 @@ func (b *Broadcast) RandSend(msg interface{}) error {
 
 // PeerConnect is called every time a Session is initialized and connected
 func (b *Broadcast) PeerConnect(s libp2p.Session) {
-	if b.limit <= len(b.conns) {
+	if b.Limit <= len(b.conns) {
 		return
 	}
-	key := s.GetPeerAddr().User()
+	key := s.GetEnv(libp2p.EnvConnectID)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.conns[key] = s
@@ -82,7 +86,7 @@ func (b *Broadcast) PeerConnect(s libp2p.Session) {
 
 // PeerDisconnect is called every time a Session connection is closed
 func (b *Broadcast) PeerDisconnect(s libp2p.Session) {
-	key := s.GetPeerAddr().User()
+	key := s.GetEnv(libp2p.EnvConnectID)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.conns, key)

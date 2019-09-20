@@ -6,6 +6,7 @@ import (
 	"encoding/gob"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"runtime/debug"
 	"sync"
@@ -37,6 +38,11 @@ func newSession(m *Manager, conn libp2p.Conn, peer []byte, sync bool) *Session {
 	out.mgr = m
 	out.selfID = m.cryp.GetPublic()
 	out.peerID = peer
+	m.mu.Lock()
+	m.count++
+	cid := m.count
+	m.mu.Unlock()
+	out.SetEnv(libp2p.EnvConnectID, fmt.Sprintf("c%x", cid))
 
 	if len(peer) > 0 {
 		conn.RemoteAddr().UpdateUser(hex.EncodeToString(peer))

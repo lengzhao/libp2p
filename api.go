@@ -83,6 +83,9 @@ type Network interface {
 	Close()
 }
 
+// EnvConnectID the env key of ConnectID,the connection have different id
+const EnvConnectID = "cid"
+
 // Session interface of session
 type Session interface {
 	// encode by gob

@@ -19,6 +19,7 @@ import (
 // Manager network manager
 type Manager struct {
 	mu       sync.Mutex
+	count    uint64
 	address  string
 	scheme   string
 	plugins  []libp2p.IPlugin
