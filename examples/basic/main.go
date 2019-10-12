@@ -21,7 +21,9 @@ func main() {
 	}
 
 	n.RegistPlugin(new(plugins.DiscoveryPlugin))
-	n.RegistPlugin(plugins.NewBroadcast(0))
-	n.RegistPlugin(plugins.NewBootstrap([]string{*peer}))
+	n.RegistPlugin(new(plugins.Broadcast))
+	bs := new(plugins.Bootstrap)
+	bs.Addrs = []string{*peer}
+	n.RegistPlugin(bs)
 	n.Listen(*address)
 }
