@@ -67,8 +67,10 @@ func main() {
 	}
 
 	n.RegistPlugin(new(plugins.DiscoveryPlugin))
-	n.RegistPlugin(plugins.NewBootstrap([]string{*peer}))
-	n.RegistPlugin(plugins.NewBroadcast(0))
+	n.RegistPlugin(new(plugins.Broadcast))
+	bs := new(plugins.Bootstrap)
+	bs.Addrs = []string{*peer}
+	n.RegistPlugin(bs)
 	n.RegistPlugin(new(ChatPlugin))
 	go func() {
 		//log.Printf("Please enter your message: ")

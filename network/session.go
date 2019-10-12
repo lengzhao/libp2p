@@ -28,7 +28,8 @@ type Session struct {
 }
 
 const (
-	magic = 21341
+	magic     = 21341
+	notifyKey = "_plugin_notified"
 )
 
 func newSession(m *Manager, conn libp2p.Conn, peer []byte, sync bool) *Session {
@@ -46,9 +47,6 @@ func newSession(m *Manager, conn libp2p.Conn, peer []byte, sync bool) *Session {
 
 	if len(peer) > 0 {
 		conn.RemoteAddr().UpdateUser(hex.EncodeToString(peer))
-		for _, p := range m.plugins {
-			p.PeerConnect(out)
-		}
 	}
 
 	if sync {
@@ -69,7 +67,7 @@ func (s *Session) receive() {
 	defer func() {
 		// log.Println("session close:", s.conn.RemoteAddr().String())
 		s.conn.Close()
-		if len(s.peerID) == 0 {
+		if s.GetEnv(notifyKey) == "" {
 			return
 		}
 		for _, p := range s.mgr.plugins {
@@ -115,10 +113,7 @@ func (s *Session) receive() {
 		}
 		sign := data[1 : signLen+1]
 		data = data[signLen+1:]
-		err = s.process(data, sign)
-		// if err != nil {
-		// 	log.Println("fail to process:", err)
-		// }
+		s.process(data, sign)
 	}
 }
 
@@ -196,15 +191,13 @@ func (s *Session) process(data, sign []byte) error {
 	if len(s.peerID) == 0 {
 		s.peerID = e.From
 		s.GetPeerAddr().UpdateUser(hex.EncodeToString(e.From))
-		for _, p := range s.mgr.plugins {
-			p.PeerConnect(s)
-		}
 	}
 	if bytes.Compare(s.peerID, e.From) != 0 {
 		s.Close()
 		stat.Add("err_pid", 1)
 		return errors.New("error peer id")
 	}
+
 	// log.Printf("sign info.self:%x,sign:%x,peer:%x\n", s.selfID, sign, s.peerID)
 	check := s.mgr.cryp.Verify(e.SignType, data, sign, s.peerID)
 	if !check {
@@ -213,6 +206,14 @@ func (s *Session) process(data, sign []byte) error {
 		return errors.New("error sign")
 	}
 	stat.Add("event", 1)
+
+	if s.GetEnv(notifyKey) == "" {
+		s.SetEnv(notifyKey, "true")
+		for _, p := range s.mgr.plugins {
+			p.PeerConnect(s)
+		}
+	}
+
 	// log.Printf("event:%#v\n", e)
 	for _, p := range s.mgr.plugins {
 		p.Receive(&e)
