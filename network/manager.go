@@ -6,6 +6,7 @@ import (
 	"errors"
 	"expvar"
 	"log"
+	"net"
 	"net/url"
 	"runtime/debug"
 	"strings"
@@ -59,6 +60,7 @@ func (m *Manager) Listen(address string) error {
 	if m.active {
 		return errors.New("error status,it is active")
 	}
+	var listenAddr string
 	id := hex.EncodeToString(m.cryp.GetPublic())
 	addrs := strings.Split(address, ",")
 	for i, addr := range addrs {
@@ -68,14 +70,25 @@ func (m *Manager) Listen(address string) error {
 			log.Println("fail to parse address:", addr)
 			continue
 		}
-		if u.Hostname() == "" {
-			log.Println("warning. unknow ip of listen")
-		}
+
 		u.User = url.User(id)
 
 		if m.active {
 			go m.connPool.Listen(u.String(), m.process)
 			continue
+		}
+		listenAddr = u.String()
+
+		host, port, err := net.SplitHostPort(u.Host)
+		if err == nil {
+			if port != "0" && port != "" && (host == "" || host == "0.0.0.0") {
+				conn, err := net.Dial("udp", "google.com:80")
+				if err == nil {
+					defer conn.Close()
+					host, _, _ = net.SplitHostPort(conn.LocalAddr().String())
+					u.Host = net.JoinHostPort(host, port)
+				}
+			}
 		}
 
 		m.scheme = u.Scheme
@@ -88,7 +101,7 @@ func (m *Manager) Listen(address string) error {
 		}
 	}
 	// log.Println("listen address:", m.address)
-	return m.connPool.Listen(m.address, m.process)
+	return m.connPool.Listen(listenAddr, m.process)
 }
 
 // NewSession new connection
@@ -149,9 +162,9 @@ func (m *Manager) SendInternalMsg(msg libp2p.InterMsg) {
 			}
 		}()
 		m.mu.Lock()
-		ps := make([]libp2p.IPlugin,len(m.plugins))
-		for i,p := range m.plugins{
-			ps[i]=p
+		ps := make([]libp2p.IPlugin, len(m.plugins))
+		for i, p := range m.plugins {
+			ps[i] = p
 		}
 		m.mu.Unlock()
 		for _, p := range ps {
