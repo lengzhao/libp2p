@@ -132,14 +132,14 @@ func (c *S2SPool) Dial(addr string) (libp2p.Conn, error) {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	conn, ok := c.conns[u.Host]
-	if ok {
-		return conn, nil
-	}
-
 	nConn, err := net.Dial("udp", u.Host)
 	if err != nil {
 		return nil, err
+	}
+
+	conn, ok := c.conns[nConn.RemoteAddr().String()]
+	if ok {
+		return conn, nil
 	}
 	out := newS2SConn(c, newAddr(u, true), nConn.RemoteAddr())
 	c.conns[out.peer.String()] = out
