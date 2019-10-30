@@ -23,6 +23,7 @@ type Ping struct {
 type Pong struct {
 	FromAddr string
 	IsServer bool
+	ToAddr   string
 }
 
 // Find find other nodes

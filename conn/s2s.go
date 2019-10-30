@@ -142,7 +142,7 @@ func (c *S2SPool) Dial(addr string) (libp2p.Conn, error) {
 		return nil, err
 	}
 	out := newS2SConn(c, newAddr(u, true), nConn.RemoteAddr())
-	c.conns[u.Host] = out
+	c.conns[out.peer.String()] = out
 	return out, nil
 }
 
