@@ -110,14 +110,14 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		}
 		selfAddr := e.GetSession().GetSelfAddr()
 		if selfAddr.IsServer() {
-			e.Reply(Pong{selfAddr.String(), true})
+			e.Reply(Pong{selfAddr.String(), true, peer.String()})
 		} else {
 			peer.SetServer()
 			rst := d.addNode(peer.String())
 			if rst {
 				e.GetSession().SetEnv(envDHT, envValue)
 			}
-			e.Reply(Pong{d.address, false})
+			e.Reply(Pong{d.address, false, peer.String()})
 		}
 	case Pong:
 		// log.Printf("Pong from <%s> %t, self:%s\n", msg.FromAddr, msg.IsServer, e.GetSession().GetSelfAddr())
