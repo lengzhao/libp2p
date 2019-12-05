@@ -16,13 +16,14 @@ type PoolMgr struct {
 	mu       sync.Mutex
 	pool     map[string]libp2p.ConnPool
 	handle   func(conn libp2p.Conn)
-	listener libp2p.ConnPool
+	listener []libp2p.ConnPool
 }
 
 // NewMgr new manager of connection pool
 func NewMgr() *PoolMgr {
 	out := new(PoolMgr)
 	out.pool = make(map[string]libp2p.ConnPool)
+	out.listener = make([]libp2p.ConnPool, 0)
 	return out
 }
 
@@ -55,7 +56,7 @@ func (mgr *PoolMgr) Listen(addr string, handle func(libp2p.Conn)) error {
 		return errors.New("unsupport scheme")
 	}
 	mgr.handle = handle
-	mgr.listener = pool
+	mgr.listener = append(mgr.listener, pool)
 	err = pool.Listen(addr, mgr.process)
 	if err != nil {
 		log.Println("fail to listen address:", addr, err)
@@ -98,7 +99,9 @@ func (mgr *PoolMgr) process(conn libp2p.Conn) {
 
 // Close close
 func (mgr *PoolMgr) Close() {
-	mgr.listener.Close()
+	for _, l := range mgr.listener {
+		l.Close()
+	}
 }
 
 type dfConn struct {
