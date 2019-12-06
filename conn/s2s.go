@@ -58,7 +58,11 @@ func (c *S2SPool) Listen(addr string, handle func(libp2p.Conn)) error {
 		data := make([]byte, 1500)
 		n, peer, err := c.server.ReadFrom(data)
 		if err != nil {
-			return nil
+			log.Println("fail to readFrom:", c.address.String(), err)
+			if !c.active {
+				return nil
+			}
+			continue
 		}
 		pAddr := peer.String()
 		var ops = connOpsData
@@ -149,6 +153,7 @@ func (c *S2SPool) Dial(addr string) (libp2p.Conn, error) {
 // Close closes the listener.
 // Any blocked Accept operations will be unblocked and return errors.
 func (c *S2SPool) Close() {
+	c.active = false
 	c.server.Close()
 	c.mu.Lock()
 	defer c.mu.Unlock()

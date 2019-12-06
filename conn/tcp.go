@@ -10,8 +10,9 @@ import (
 
 // TCPPool default connection,such as:tcp,unix
 type TCPPool struct {
-	l    net.Listener
-	addr *dfAddr
+	l      net.Listener
+	addr   *dfAddr
+	active bool
 }
 
 // Listen listen
@@ -28,12 +29,16 @@ func (c *TCPPool) Listen(addr string, handle func(libp2p.Conn)) error {
 	}
 	u.Host = c.l.Addr().String()
 	c.addr = newAddr(u, true)
+	c.active = true
 	log.Println("listen:", c.addr.String())
 	for {
 		conn, err := c.l.Accept()
 		if err != nil {
+			if !c.active {
+				return nil
+			}
 			log.Println("fail to accept new connection", err)
-			return nil
+			continue
 		}
 		u1, _ := url.Parse(addr)
 		u1.Host = conn.LocalAddr().String()
@@ -50,6 +55,7 @@ func (c *TCPPool) Listen(addr string, handle func(libp2p.Conn)) error {
 
 // Close close the listener
 func (c *TCPPool) Close() {
+	c.active = false
 	c.l.Close()
 }
 
