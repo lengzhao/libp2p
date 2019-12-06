@@ -99,6 +99,7 @@ func (mgr *PoolMgr) process(conn libp2p.Conn) {
 
 // Close close
 func (mgr *PoolMgr) Close() {
+	log.Println("stop all listener")
 	for _, l := range mgr.listener {
 		l.Close()
 	}

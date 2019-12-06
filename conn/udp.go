@@ -49,7 +49,11 @@ func (c *UDPPool) Listen(addr string, handle func(libp2p.Conn)) error {
 		data := make([]byte, 1500)
 		n, peer, err := c.server.ReadFrom(data)
 		if err != nil {
-			return nil
+			log.Println("fail to readFrom:", c.address.String())
+			if !c.active {
+				return nil
+			}
+			continue
 		}
 		address := peer.String()
 		if n == len(closeData) && bytes.Compare(data[:n], closeData) == 0 {
@@ -124,6 +128,7 @@ func (c *UDPPool) Dial(addr string) (libp2p.Conn, error) {
 // Close closes the listener.
 // Any blocked Accept operations will be unblocked and return errors.
 func (c *UDPPool) Close() {
+	c.active = false
 	c.server.Close()
 	for k, conn := range c.conns {
 		delete(c.conns, k)
