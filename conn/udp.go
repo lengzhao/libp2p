@@ -49,7 +49,7 @@ func (c *UDPPool) Listen(addr string, handle func(libp2p.Conn)) error {
 		data := make([]byte, 1500)
 		n, peer, err := c.server.ReadFrom(data)
 		if err != nil {
-			log.Println("fail to readFrom:", c.address.String())
+			log.Println("fail to readFrom:", c.address.String(), err)
 			if !c.active {
 				return nil
 			}
@@ -84,6 +84,7 @@ func (c *UDPPool) Listen(addr string, handle func(libp2p.Conn)) error {
 type udpClient struct {
 	dfConn
 	timeout time.Duration
+	wmu     sync.Mutex
 }
 
 func (c *udpClient) Close() error {
@@ -102,6 +103,28 @@ func (c *udpClient) Read(data []byte) (int, error) {
 		return 0, errors.New("closed")
 	}
 	return n, err
+}
+
+// Write writes data to the connection.
+// Write can be made to time out and return an Error with Timeout() == true
+// after a fixed time limit; see SetDeadline and SetWriteDeadline.
+func (c *udpClient) Write(b []byte) (n int, err error) {
+	var dfNum int = UDPMtu
+	var num int
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	for len(b) > 0 {
+		if len(b) < dfNum {
+			dfNum = len(b)
+		}
+		num, err = c.Conn.Write(b[:dfNum])
+		b = b[dfNum:]
+		if err != nil {
+			return
+		}
+		n += num
+	}
+	return
 }
 
 // Dial dial
@@ -144,7 +167,7 @@ func (c *UDPPool) removeConn(addr string) {
 }
 
 type udpConn struct {
-	mu       sync.Mutex
+	wmu      sync.Mutex
 	active   bool
 	conn     *UDPPool
 	buff     []byte
@@ -214,7 +237,22 @@ func (c *udpConn) Read(b []byte) (n int, err error) {
 // Write can be made to time out and return an Error with Timeout() == true
 // after a fixed time limit; see SetDeadline and SetWriteDeadline.
 func (c *udpConn) Write(b []byte) (n int, err error) {
-	return c.conn.server.WriteTo(b, c.peer)
+	var dfNum int = UDPMtu
+	var num int
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	for len(b) > 0 {
+		if len(b) < dfNum {
+			dfNum = len(b)
+		}
+		num, err = c.conn.server.WriteTo(b[:dfNum], c.peer)
+		b = b[dfNum:]
+		if err != nil {
+			return
+		}
+		n += num
+	}
+	return
 }
 
 // Close closes the connection.

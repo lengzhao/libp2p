@@ -26,6 +26,9 @@ type S2SPool struct {
 var closeData = []byte("_close")
 var keepaliveData = []byte("_alive")
 
+// UDPMtu mtu of udp
+var UDPMtu = 1200
+
 const (
 	connOpsClose = iota
 	connOpsKeepalive
@@ -171,7 +174,7 @@ func (c *S2SPool) removeConn(addr string) {
 }
 
 type s2sConn struct {
-	mu     sync.Mutex
+	wmu    sync.Mutex
 	conn   *S2SPool
 	buff   []byte
 	cached chan []byte
@@ -248,7 +251,22 @@ func (c *s2sConn) Read(b []byte) (n int, err error) {
 // Write can be made to time out and return an Error with Timeout() == true
 // after a fixed time limit; see SetDeadline and SetWriteDeadline.
 func (c *s2sConn) Write(b []byte) (n int, err error) {
-	return c.conn.server.WriteTo(b, c.peer)
+	var dfNum int = UDPMtu
+	var num int
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	for len(b) > 0 {
+		if len(b) < dfNum {
+			dfNum = len(b)
+		}
+		num, err = c.conn.server.WriteTo(b[:dfNum], c.peer)
+		b = b[dfNum:]
+		if err != nil {
+			return
+		}
+		n += num
+	}
+	return
 }
 
 // Close closes the connection.
