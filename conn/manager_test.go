@@ -1,7 +1,9 @@
 package conn
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"github.com/lengzhao/libp2p"
 	"log"
 	"testing"
@@ -10,17 +12,31 @@ import (
 
 type Handler1 struct {
 	Data chan []byte
+	size int
 }
 
 func (h *Handler1) cb(conn libp2p.Conn) {
-	data := make([]byte, 100)
-	n, _ := conn.Read(data)
-	h.Data <- data[:n]
+	var rst []byte
+	for h.size > 0 {
+		data := make([]byte, 2000)
+		n, err := conn.Read(data)
+		if err != nil {
+			break
+		}
+		rst = append(rst, data[:n]...)
+		if n > h.size {
+			break
+		}
+		h.size -= n
+	}
+	h.Data <- rst
 	conn.Close()
+	fmt.Println("server close,", conn.LocalAddr(), conn.RemoteAddr())
 }
 
-func runCloseByServer(addr1, addr2 string) error {
+func runCloseByServer(addr1, addr2 string, data []byte) error {
 	h := new(Handler1)
+	h.size = len(data)
 	h.Data = make(chan []byte)
 	mgr1 := new(PoolMgr)
 	mgr1.pool = make(map[string]libp2p.ConnPool)
@@ -46,10 +62,10 @@ func runCloseByServer(addr1, addr2 string) error {
 		return err
 	}
 	defer s1.Close()
-	data := "aaaaaa"
-	s1.Write([]byte(data))
+	// data := "aaaaaa"
+	s1.Write(data)
 	serData := <-h.Data
-	if data != string(serData) {
+	if bytes.Compare(data, serData) != 0 {
 		return errors.New("fail to send data")
 	}
 	d := make([]byte, 10)
@@ -127,9 +143,10 @@ func runCloseByClient(addr1, addr2 string) error {
 }
 
 func TestManager1(t *testing.T) {
+	log.Println("start test:", t.Name())
 	addr1 := "ws://addr1@127.0.0.1:3000/echo"
 	addr2 := "ws://addr2@127.0.0.1:3001/echo"
-	err := runCloseByServer(addr1, addr2)
+	err := runCloseByServer(addr1, addr2, []byte("111111111111"))
 	if err != nil {
 		t.Error(err)
 	}
@@ -139,9 +156,10 @@ func TestManager1(t *testing.T) {
 	}
 }
 func TestManager2(t *testing.T) {
+	log.Println("start test:", t.Name())
 	addr1 := "udp://addr1@127.0.0.1:3000/echo"
 	addr2 := "udp://addr2@127.0.0.1:3001/echo"
-	err := runCloseByServer(addr1, addr2)
+	err := runCloseByServer(addr1, addr2, []byte("111111111111"))
 	if err != nil {
 		t.Error(err)
 	}
@@ -151,9 +169,10 @@ func TestManager2(t *testing.T) {
 	}
 }
 func TestManager3(t *testing.T) {
+	log.Println("start test:", t.Name())
 	addr1 := "s2s://addr1@127.0.0.1:3000/echo"
 	addr2 := "s2s://addr2@127.0.0.1:3001/echo"
-	err := runCloseByServer(addr1, addr2)
+	err := runCloseByServer(addr1, addr2, []byte("111111111111"))
 	if err != nil {
 		t.Error(err)
 	}
@@ -163,9 +182,10 @@ func TestManager3(t *testing.T) {
 	}
 }
 func TestManager4(t *testing.T) {
+	log.Println("start test:", t.Name())
 	addr1 := "tcp://addr1@127.0.0.1:3000/echo"
 	addr2 := "tcp://addr2@127.0.0.1:3001/echo"
-	err := runCloseByServer(addr1, addr2)
+	err := runCloseByServer(addr1, addr2, []byte("111111111111"))
 	if err != nil {
 		t.Error(err)
 	}
@@ -176,56 +196,75 @@ func TestManager4(t *testing.T) {
 }
 
 // udp client io timeout
-// func TestManager5(t *testing.T) {
-// 	addr1 := "udp://addr1@127.0.0.1:3000/echo"
-// 	addr2 := "udp://addr2@127.0.0.1:3001/echo"
+func TestManager5(t *testing.T) {
+	log.Println("start test:", t.Name())
+	addr1 := "udp://addr1@127.0.0.1:3000/echo"
+	addr2 := "udp://addr2@127.0.0.1:3001/echo"
 
-// 	h := new(Handler2)
-// 	h.Data = make(chan []byte)
-// 	mgr1 := new(PoolMgr)
-// 	mgr1.pool = make(map[string]libp2p.ConnPool)
-// 	mgr1.RegConnPool("tcp", new(TCPPool))
-// 	mgr1.RegConnPool("udp", new(UDPPool))
-// 	mgr1.RegConnPool("ws", new(WSPool))
-// 	mgr1.RegConnPool("s2s", new(S2SPool))
+	h := new(Handler2)
+	h.Data = make(chan []byte)
+	mgr1 := new(PoolMgr)
+	mgr1.pool = make(map[string]libp2p.ConnPool)
+	mgr1.RegConnPool("tcp", new(TCPPool))
+	mgr1.RegConnPool("udp", new(UDPPool))
+	mgr1.RegConnPool("ws", new(WSPool))
+	mgr1.RegConnPool("s2s", new(S2SPool))
 
-// 	mgr2 := new(PoolMgr)
-// 	mgr2.pool = make(map[string]libp2p.ConnPool)
-// 	mgr2.RegConnPool("tcp", new(TCPPool))
-// 	mgr2.RegConnPool("udp", new(UDPPool))
-// 	mgr2.RegConnPool("ws", new(WSPool))
-// 	mgr2.RegConnPool("s2s", new(S2SPool))
-// 	go mgr1.Listen(addr1, h.cb)
-// 	go mgr2.Listen(addr2, h.cb)
+	mgr2 := new(PoolMgr)
+	mgr2.pool = make(map[string]libp2p.ConnPool)
+	mgr2.RegConnPool("tcp", new(TCPPool))
+	mgr2.RegConnPool("udp", new(UDPPool))
+	mgr2.RegConnPool("ws", new(WSPool))
+	mgr2.RegConnPool("s2s", new(S2SPool))
+	go mgr1.Listen(addr1, h.cb)
+	go mgr2.Listen(addr2, h.cb)
 
-// 	defer mgr1.Close()
-// 	defer mgr2.Close()
-// 	time.Sleep(2 * time.Second)
-// 	s1, err := mgr2.Dial(addr1)
-// 	if err != nil {
-// 		t.Error(err)
-// 		return
-// 	}
-// 	data := "aaaaa"
-// 	s1.Write([]byte(data))
-// 	serData := <-h.Data
-// 	if data != string(serData) {
-// 		t.Error("fail to send data")
-// 		return
-// 	}
+	defer mgr1.Close()
+	defer mgr2.Close()
+	time.Sleep(2 * time.Second)
+	s1, err := mgr2.Dial(addr1)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	data := "aaaaa"
+	s1.Write([]byte(data))
+	serData := <-h.Data
+	if data != string(serData) {
+		t.Error("fail to send data")
+		return
+	}
 
-// 	buf := make([]byte, 10)
-// 	_, err = s1.Read(buf)
-// 	if err == nil {
-// 		t.Error("hope io timeout")
-// 		return
-// 	}
-// 	log.Println("read restult:", err)
-// 	s1.Close()
+	buf := make([]byte, 10)
+	_, err = s1.Read(buf)
+	if err == nil {
+		t.Error("hope io timeout")
+		return
+	}
+	log.Println("read restult:", err)
+	s1.Close()
 
-// 	serData = <-h.Data
-// 	if serData != nil {
-// 		t.Error("fail to close connection")
-// 		return
-// 	}
-// }
+	serData = <-h.Data
+	if serData != nil {
+		t.Error("fail to close connection")
+		return
+	}
+}
+
+func TestManager6(t *testing.T) {
+	log.Println("start test:", t.Name())
+	addr1 := "udp://addr1@127.0.0.1:3000/echo"
+	addr2 := "udp://addr2@127.0.0.1:3001/echo"
+	data := make([]byte, 1990)
+	for i := 0; i < len(data); i++ {
+		data[i] = byte(i)
+	}
+	err := runCloseByServer(addr1, addr2, data)
+	if err != nil {
+		t.Error(err)
+	}
+	err = runCloseByClient(addr1, addr2)
+	if err != nil {
+		t.Error(err)
+	}
+}
