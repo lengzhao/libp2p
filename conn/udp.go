@@ -258,6 +258,7 @@ func (c *udpConn) Write(b []byte) (n int, err error) {
 // Close closes the connection.
 // Any blocked Read or Write operations will be unblocked and return errors.
 func (c *udpConn) Close() error {
+	defer recover()
 	c.active = false
 	select {
 	case <-c.die:
