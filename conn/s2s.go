@@ -184,6 +184,7 @@ type s2sConn struct {
 	peerAddr *dfAddr
 	rcount   int
 	die      chan bool
+	closed   bool
 }
 
 func newS2SConn(p *S2SPool, paddr *dfAddr, udpAddr net.Addr) *s2sConn {
@@ -276,6 +277,13 @@ func (c *s2sConn) Close() error {
 	select {
 	case <-c.die:
 	default:
+		c.wmu.Lock()
+		if c.closed {
+			c.wmu.Unlock()
+			return nil
+		}
+		c.closed = true
+		c.wmu.Unlock()
 		close(c.die)
 		c.Write(closeData)
 		go c.conn.removeConn(c.peer.String())
