@@ -176,6 +176,7 @@ type udpConn struct {
 	selfAddr libp2p.Addr
 	peerAddr libp2p.Addr
 	die      chan bool
+	closed   bool
 }
 
 func newUDPConn(p *UDPPool, addr net.Addr) *udpConn {
@@ -264,6 +265,13 @@ func (c *udpConn) Close() error {
 	case <-c.die:
 		return nil
 	default:
+		c.wmu.Lock()
+		if c.closed {
+			c.wmu.Unlock()
+			return nil
+		}
+		c.closed = true
+		c.wmu.Unlock()
 		close(c.die)
 		c.Write(closeData)
 		// log.Println("close udpConn:", c.peer.String())
