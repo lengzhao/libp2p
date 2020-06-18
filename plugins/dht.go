@@ -112,6 +112,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		if tStr != "" {
 			t, _ := strconv.ParseInt(tStr, 10, 64)
 			if t+timeout > now {
+				stat.Add("reducePing", 1)
 				return nil
 			}
 		}
@@ -144,6 +145,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		if t+timeout < now {
 			e.GetSession().SetEnv(envPongTime, fmt.Sprintf("%d", now))
 			e.Reply(Find{d.self})
+			stat.Add("reducePong", 1)
 		}
 
 		if e.GetSession().GetEnv(envDHT) == envValue {
@@ -219,9 +221,11 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 				continue
 			}
 			if session.GetEnv(envPingTime) != "" {
+				stat.Add("reduceNewSession", 1)
 				continue
 			}
 			if session.GetEnv(envPongTime) != "" {
+				stat.Add("reduceNewSession", 1)
 				continue
 			}
 			err = session.Send(Ping{IsServer: session.GetSelfAddr().IsServer()})

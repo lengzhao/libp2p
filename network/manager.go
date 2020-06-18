@@ -133,6 +133,7 @@ func (m *Manager) NewSession(address string) (libp2p.Session, error) {
 	}
 
 	if !m.enableConn(address) {
+		stat.Add("connectFrequently", 1)
 		return nil, errors.New("connect frequently")
 	}
 
