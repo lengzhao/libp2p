@@ -11,6 +11,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/lengzhao/libp2p"
 	"github.com/lengzhao/libp2p/conn"
@@ -23,6 +24,7 @@ type Manager struct {
 	count    uint64
 	address  string
 	scheme   string
+	connTime map[string]int64
 	plugins  []libp2p.IPlugin
 	active   bool
 	connPool libp2p.ConnPoolMgr
@@ -31,12 +33,16 @@ type Manager struct {
 
 var stat = expvar.NewMap("net_mgr")
 
+// ConnectionInterval Limit frequent connections to the same address
+var ConnectionInterval int64 = 30
+
 // New new network manager
 func New() *Manager {
 	out := new(Manager)
 	out.plugins = make([]libp2p.IPlugin, 0)
 	out.connPool = conn.GetDefaultMgr()
 	out.cryp = crypto.GetDefaultMgr()
+	out.connTime = make(map[string]int64)
 	return out
 }
 
@@ -126,6 +132,10 @@ func (m *Manager) NewSession(address string) (libp2p.Session, error) {
 		return nil, errors.New("try to connect self")
 	}
 
+	if !m.enableConn(address) {
+		return nil, errors.New("connect frequently")
+	}
+
 	conn, err := m.connPool.Dial(address)
 	if err != nil {
 		return nil, err
@@ -134,6 +144,26 @@ func (m *Manager) NewSession(address string) (libp2p.Session, error) {
 	s := newSession(m, conn, id, false)
 	stat.Add("NewSession", 1)
 	return s, nil
+}
+
+func (m *Manager) enableConn(address string) bool {
+	now := time.Now().Unix()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	old := m.connTime[address]
+	if old+ConnectionInterval > now {
+		return false
+	}
+	m.connTime[address] = now
+
+	if len(m.connTime) > 2000 {
+		for k := range m.connTime {
+			delete(m.connTime, k)
+			break
+		}
+	}
+
+	return true
 }
 
 func (m *Manager) process(conn libp2p.Conn) {
