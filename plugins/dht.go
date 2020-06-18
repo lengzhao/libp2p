@@ -66,6 +66,7 @@ const (
 	envServerAddr  = "address"
 	envPingTime    = "PingTime"
 	envPongTime    = "PongTime"
+	envFindTime    = "PongTime"
 	maxConnPreUser = 5
 	timeout        = 30 // second
 )
@@ -109,12 +110,13 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		stat.Add("Ping", 1)
 		now := time.Now().Unix()
 		tStr := e.GetSession().GetEnv(envPingTime)
+		var t int64
 		if tStr != "" {
-			t, _ := strconv.ParseInt(tStr, 10, 64)
-			if t+timeout > now {
-				stat.Add("reducePing", 1)
-				return nil
-			}
+			t, _ = strconv.ParseInt(tStr, 10, 64)
+		}
+		if t+timeout > now {
+			stat.Add("reducePing", 1)
+			return nil
 		}
 		e.GetSession().SetEnv(envPingTime, fmt.Sprintf("%d", now))
 		peer := e.GetSession().GetPeerAddr()
@@ -145,6 +147,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		if t+timeout < now {
 			e.GetSession().SetEnv(envPongTime, fmt.Sprintf("%d", now))
 			e.Reply(Find{d.self})
+		} else {
 			stat.Add("reducePong", 1)
 		}
 
@@ -183,6 +186,17 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 		}
 	case Find:
 		stat.Add("Find", 1)
+		var t int64
+		now := time.Now().Unix()
+		tStr := e.GetSession().GetEnv(envFindTime)
+		if tStr != "" {
+			t, _ = strconv.ParseInt(tStr, 10, 64)
+		}
+		if t+timeout > now {
+			stat.Add("reduceFind", 1)
+			return nil
+		}
+		e.GetSession().SetEnv(envFindTime, fmt.Sprintf("%d", now))
 		// log.Printf("Find from <%s>\n", e.GetSession().GetPeerAddr())
 		peer := new(dht.NodeID)
 		peer.PublicKey = msg.Key
@@ -275,6 +289,7 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			session.Send(Ping{IsServer: session.GetSelfAddr().IsServer()})
 			// log.Println("Traversal dst, send DhtPing to:", msg.FromAddr)
 		} else if bytes.Compare(fid, e.GetPeerID()) == 0 { //proxy
+			stat.Add("NatTraversalProxy", 1)
 			var session libp2p.Session
 			if d.getConnByUID(fu.User.Username()) == nil {
 				return nil
