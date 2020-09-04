@@ -66,7 +66,7 @@ const (
 	envServerAddr  = "address"
 	envPingTime    = "PingTime"
 	envPongTime    = "PongTime"
-	envFindTime    = "PongTime"
+	envFindTime    = "FindTime"
 	maxConnPreUser = 5
 	timeout        = 30 // second
 )
@@ -284,6 +284,12 @@ func (d *DiscoveryPlugin) Receive(e libp2p.Event) error {
 			}
 			session := d.newConn(msg.FromAddr)
 			if session == nil {
+				return nil
+			}
+			if session.GetEnv(envPingTime) != "" {
+				return nil
+			}
+			if session.GetEnv(envPongTime) != "" {
 				return nil
 			}
 			session.Send(Ping{IsServer: session.GetSelfAddr().IsServer()})
